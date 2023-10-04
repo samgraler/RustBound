@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "bench-ghidra"
+version = "0.1.0"
+description = ""
+authors = ["ESPR3SS0 <98864173+ESPR3SS0@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "bench_ghidra"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
