@@ -44,7 +44,7 @@ class GhidraBenchResult:
     ground_truth: List[int] 
     functions: List[int] 
     runtime: float 
-    exact_ghid_command : str
+    #exact_ghid_command : str
 
 @dataclass
 class ListCompare():
@@ -490,14 +490,14 @@ def smol_ghid_bench(
 
     return  res
 
+
    
 
 def NEW_ghidra_bench_functions(
     bin_path: Path, 
     post_script: Path = Path("~/ghidra_scripts/List_Function_and_Entry.py").expanduser(),
     script_path: Path = Path("~/ghidra_scripts/").expanduser(),
-    analyzer: Path = 
-    Path("~/ghidra_10.3.3_PUBLIC/support/analyzeHeadless").expanduser().resolve(),
+    analyzer: Path = Path("~/ghidra_10.3.3_PUBLIC/support/analyzeHeadless").expanduser().resolve(),
     verbose=False,
     no_analysis=False):
 
@@ -579,6 +579,7 @@ def NEW_ghidra_bench_functions(
             'strip_runtime' : strip_runtime,
             'gnd_addrs' :  gnd_addrs,
             }
+
     #res = GhidraBenchResult(
     #    bin_name = bin_path.name
 
@@ -999,7 +1000,7 @@ def bench_single(
 @app.command()
 def bench(
     opt_lvl: Annotated[str, typer.Argument()],
-    output_dir: Annotated[str, typer.Option()] = ".ghidra_bench/",
+    output_dir: Annotated[str, typer.Option()] = "ghidra_bench_results/",
     cache_analysis_info: Annotated[bool,typer.Option()] = True,
     show_summary: Annotated[bool,typer.Option()] = True,
     verbose: Annotated[bool,typer.Option()] = False,
