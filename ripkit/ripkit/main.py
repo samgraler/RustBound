@@ -1,4 +1,6 @@
 import typer
+import shutil
+from itertools import chain
 import lief
 import math
 import json
@@ -7,8 +9,13 @@ from typing_extensions import Annotated
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
 
+from rich.console import Console
+from rich.table import Table
+from rich.progress import track
 
+console = Console()
 app = typer.Typer()
+
 
 from ripkit.cargo_picky import (
     gen_cargo_build_cmd,
@@ -191,6 +198,50 @@ def generate_xda_train_in_files():
     #               USED for testing individual files, USED in play_func_bound
 
     return
+
+
+def get_all_bins()->dict:
+    '''
+    Get all the binaries by the optimization
+    '''
+
+    bin_by_opt = {
+        '0': [],
+        '1': [],
+        '2': [],
+        '3': [],
+        'z': [],
+        's': [],
+    }
+
+
+    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+        info_file = parent / 'info.json'
+        info = {}
+        try:
+            with open(info_file, 'r') as f:
+                info = json.load(f)
+        except FileNotFoundError:
+            print(f"File not found: {info_file}")
+            continue
+        except json.JSONDecodeError as e:
+            print(f"JSON decoding error: {e}")
+            continue
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            continue
+
+        # Define the binary file name
+        bin_file = parent / info['binary_name']
+
+        opt = info['optimization']
+
+        if opt not in bin_by_opt.keys():
+            bin_by_opt[opt] = []
+        else:
+            bin_by_opt[opt].append(bin_file.resolve())
+    return bin_by_opt
+
 
 
 
@@ -722,8 +773,110 @@ def stats():
 
     for key, value in stats.items():
         print(f"{key} = {value}")
+    return
+
+@app.command()
+def export_dataset(
+    opt_lvl: Annotated[str, typer.Argument()],
+    bit: Annotated[int, typer.Argument()],
+    filetype: Annotated[str, typer.Argument()],
+    output_dir: Annotated[str, typer.Option(
+        help="Save the binaries to a directory")]="",
+    output_file: Annotated[str, typer.Option(
+        help="Save the binaries paths to a file")]="",
+    min_text_bytes: Annotated[bool, typer.Option()]=True,
+    drop_dups: Annotated[bool, typer.Option()]=True,
+    ):
+    '''
+    Generate a dataset of files from the ripbin database.
+    Either copy all the binaries to a output directory 
+    -or-
+    Create a file containing the absolute paths to the binaries
+    '''
+
+    if opt_lvl not in ['0','1','2','3','z','s']:
+        print("opt lvl must be 0 1 2 3 z s")
+        return
+
+    out_to_dir = False
+    out_to_file = False
+
+    if output_dir != "":
+        out_to_dir = True
+
+        out_dir = Path(output_dir)
+
+        if out_dir.exists():
+            print("The output directory already exists, please remove it:!")
+            print("Run the following command if you are sure...")
+            print(f"rm -rf {out_dir.resolve()}")
+            return
+
+    if output_file != "":
+        out_to_file = True
+        out_file = Path(output_file)
+        if out_file.exists():
+            print("The output directory already exists, please remove it:!")
+            print("Run the following command if you are sure...")
+            print(f"rm -rf {out_file.resolve()}")
+            return
+
+
+    if not out_to_file and not out_to_dir:
+        print("No output to file or directory given")
+        return
+
+        return
+
+    # Get a dictionary of all the binaries that are in the ripbin db
+    bins = get_all_bins()
+
+    # Create the set of binary names that ripbin has a binary for as long 
+    # as the binary has been compiled for all optimization levels
+    set_of_names = set([x.name for x in bins[opt_lvl]])
+    for key in bins.keys():
+        set_of_names= set_of_names.intersection([x.name for x in bins[key]])
+
+    print(f"Found {len(set_of_names)} bins that are present in all opt lvls")
+
+    # Get a list of pathlib objects for the binaries 
+    potential_bins = [x for x in bins[opt_lvl] if x.name in set_of_names]
+
+    #TODO: Binary files can have the same name if they come from different 
+    #       packages, for now I'm not allowing these to be in any dataset
+    o0_name_set =  [x.name for x in potential_bins]
+    dup_names = []
+    for bin in o0_name_set:
+        if o0_name_set.count(bin) > 1:
+            dup_names.append(bin)
+    if dup_names != []:
+        print(f"Dropping {len(dup_names)} binaries with matching names")
+
+    bins = [x for x in potential_bins if x.name not in dup_names]
+
+    final_binset = []
+    for bin in track(bins, description=f"Checking {len(bins)} bin sizes..."):
+        parsed_bin = lief.parse(str(bin.resolve()))
+
+        # Get the text section and the bytes themselse
+        text_section = parsed_bin.get_section(".text")
+        num_text_bytes = len(text_section.content)
+        if num_text_bytes > min_text_bytes:
+            final_binset.append(bin)
+
+    if out_to_file:
+        with open(output_file,'w') as f:
+            f.write("\n".join(bin.resolve for bin in final_binset))
+
+    if out_to_dir:
+        out_dir = Path(output_dir)
+        out_dir.mkdir()
+        for bin in track(bins, description=f"Copying {len(final_binset)}..."):
+            dest_file = out_dir / bin.name
+            shutil.copy(bin.resolve(),dest_file.resolve())
 
     return
+
 
 @app.command()
 def build_analyze_all(
@@ -778,6 +931,7 @@ def build_analyze_all(
 
 
     if not force_build_all:
+
         for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
             info_file = parent / 'info.json'
             info = {}
