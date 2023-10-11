@@ -784,7 +784,7 @@ def export_dataset(
         help="Save the binaries to a directory")]="",
     output_file: Annotated[str, typer.Option(
         help="Save the binaries paths to a file")]="",
-    min_text_bytes: Annotated[bool, typer.Option()]=True,
+    min_text_bytes: Annotated[int, typer.Option()]=2000,
     drop_dups: Annotated[bool, typer.Option()]=True,
     ):
     '''
