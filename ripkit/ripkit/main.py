@@ -786,6 +786,7 @@ def export_dataset(
         help="Save the binaries paths to a file")]="",
     min_text_bytes: Annotated[int, typer.Option()]=2000,
     drop_dups: Annotated[bool, typer.Option()]=True,
+    verbose: Annotated[bool, typer.Option]=False,
     ):
     '''
     Generate a dataset of files from the ripbin database.
@@ -830,6 +831,9 @@ def export_dataset(
 
     # Get a dictionary of all the binaries that are in the ripbin db
     bins = get_all_bins()
+
+    if verbose:
+        print(f"Total {len(bins[opt_lvl])} binaries with opt_lvl {opt_lvl}")
 
     # Create the set of binary names that ripbin has a binary for as long 
     # as the binary has been compiled for all optimization levels
