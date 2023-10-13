@@ -37,6 +37,8 @@ from typing_extensions import Annotated
 
 from models import recreatedModel
 
+from pytorch_lightning.callbacks import ModelCheckpoint
+
 import multiprocessing 
 CPU_COUNT = multiprocessing.cpu_count()
 
@@ -685,7 +687,6 @@ if __name__ == "__main__":
 
 
 
-
     # TODO: TEMP: 
     #rust_train_files.extend(rust_test_files)
     #rust_test_files.extend(rust_o0_files[250:])
@@ -717,7 +718,16 @@ if __name__ == "__main__":
                                 shuffle=False,
                                 drop_last=True)#, num_workers=CPU_COUNT)
 
-    trainer = pylight.Trainer(max_epochs=100)
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='checkpoints',
+        filename='best_{val_loss:.2}',
+        save_top_k=1,
+        monitor='val_loss',
+        mode='min',
+        save_last=True,
+    )
+
+    trainer = pylight.Trainer(callbacks=[checkpoint_callback],max_epochs=100)
 
     classifier.reset_metrics()
 
