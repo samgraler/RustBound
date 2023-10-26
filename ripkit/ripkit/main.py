@@ -29,7 +29,8 @@ from ripkit.cargo_picky import (
     build_crate,
     RustcStripFlags,
     RustcOptimization,
-    RustcTarget
+    RustcTarget,
+    CrateBuildException,
 )
 
 from ripkit.ripbin import (
@@ -162,42 +163,6 @@ def gen_data_raw_func_bound(path: Path, output: Path):
     #print("WARNING THIS ONLY HAS THE .TEXT section")
     return
 
-
-
-@app.command()
-def generate_xda_func_finetune_files():
-    return
-@app.command()
-def generate_xda_train_in_files():
-    '''
-    '''
-    #TODO: Does XDA test on data used for finetuning
-    #TODO: Does XDA test on data used for pre-training (pre-training data 
-    #           has no labels)
-    #TODO: Does XDA fine-tune on data used in pre-training and vic versa 
-    # 
-    # XDA -> pre-training, has no labels 
-
-
-    # Data directories:
-    # 1. data-src: USED to generate data-bin. I I I put data here 
-    #       | pretrain_all
-    #       | funcbound
-    #   a. In pretrain_all there is a train.in file without all the bytes from all inputs
-    #       concatenated and demilited every 512 characters by a newline 
-    #   b. In func bound there is a train.data train.label, train.data is all bytes from all
-    #       inputs concatenated and demilited every 512 characters by a newline, but the
-    #       train.data label is a corresponding label for every byte either (S,E,N) Start
-    #       End, Neither
-    # 
-    # 2. data-bin: USED directly by the pretraining process, and finetuning 
-    #       | pretrain_all : bin_data_used_for_pretraining
-    #       | funcbound    : bin_data_used_for_fine_tuning
-    # 
-    # 3. data-raw: NOT used for pretraining NOT used for finetuning
-    #               USED for testing individual files, USED in play_func_bound
-
-    return
 
 
 def get_all_bins()->dict:
@@ -1058,6 +1023,7 @@ def build_analyze_all(
     filetype: Annotated[str, typer.Argument()],
     stop_on_fail: Annotated[bool,typer.Option()]=False,
     force_build_all: Annotated[bool,typer.Option()]=False,
+    build_arm : Annotated[bool,typer.Option()]=False,
     ):
     '''
     Build and analyze pkgs
@@ -1078,25 +1044,29 @@ def build_analyze_all(
         print("Invalid opt lvl")
         return
 
-    if bit == 64:
-        if filetype == "elf":
-            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
+    if not build_arm:
+        if bit == 64:
+            if filetype == "elf":
+                target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
+            elif filetype == "pe":
+                target = RustcTarget.X86_64_PC_WINDOWS_GNU 
+            else:
+                print("Invlaid filetype")
+                return
+        elif bit == 32:
+            if filetype == "elf":
+                target = RustcTarget.I686_UNKNOWN_LINUX_GNU
+            elif filetype == "pe":
+                target = RustcTarget.I686_PC_WINDOWS_GNU 
+            else:
+                print("Invlaid filetype")
+                return
         else:
-            print("Invlaid filetype")
-            return
-    elif bit == 32:
-        if filetype == "elf":
-            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.I686_PC_WINDOWS_GNU 
-        else:
-            print("Invlaid filetype")
+            print(f"Invlaid bit lvl {bit}")
             return
     else:
-        print(f"Invlaid bit lvl {bit}")
-        return
+        if bit == 64:
+            target = RustcTarget.AARCH64_UNKNOWN_LINUX_GNU 
 
     # List of crate current installed
     installed_crates = [x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
@@ -1129,8 +1099,6 @@ def build_analyze_all(
     # Any crates that are already built with the same target don't rebuild or analyze
 
     # Need to get all the analysis for the given optimization and target... 
-    # TODO: Assuming all targets are 64bit elf right now 
-
     crates_with_no_interest = Path(f"~/.crates_io/uninteresting_crates_cache_{target.value}").expanduser()
 
     boring_crates = []
@@ -1149,6 +1117,7 @@ def build_analyze_all(
         if x in installed_crates:
             installed_crates.remove(x)
 
+    success = 0
 
     # Build and analyze each crate
     for crate in alive_it(installed_crates):
@@ -1157,107 +1126,35 @@ def build_analyze_all(
         #       cargo's toolchain version 
         res = 0
         if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-            res = build_analyze_crate(crate, opt, target, filetype,
+            try:
+                res = build_analyze_crate(crate, opt, 
+                            target, filetype,
                             RustcStripFlags.NOSTRIP,
                             use_cargo=True)
+            except CrateBuildException:
+                print(f"Failed to build crate {crate}")
         else:
-            res = build_analyze_crate(crate, opt, target, filetype,
-                            RustcStripFlags.NOSTRIP)
+            try:
+                res = build_analyze_crate(crate, opt, 
+                            target, filetype,
+                            RustcStripFlags.NOSTRIP, use_cargo=False)
+            except CrateBuildException:
+                print(f"Failed to build crate {crate}")
+                continue
         if res == 99:
             boring_crates.append(crate)
-            print(f"Adding crate {crate} to boring crates")
+            print(f"Success build but adding {crate} to boring crates")
             with open(crates_with_no_interest, 'w') as f:
                 json.dump({'names' : boring_crates}, f)
+        else:
+            success += 1
+            print(f"[SUCCESS] crate {crate}")
+
+    print(f"Total build success: {success}")
 
 
-    # Build the crate, add the binary to a list of binaries
-    #bins = []
-    #crates_with_no_files_of_interest = []
-    #for crate in alive_it(installed_crates):
-
-    #    if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-    #        build_crate(crate, opt, target, RustcStripFlags.NOSTRIP,
-    #                    use_cargo=True, debug=True)
-    #    else:
-    #        build_crate(crate, opt, target, RustcStripFlags.NOSTRIP)
-
-    #    # Get files of interest from the crate at the target <target>
-    #    files_of_interest = [x for x in get_target_productions(crate, target) if is_executable(x)]
-
-    #    if files_of_interest != []:
-    #        bins.append(files_of_interest[0])
-    #    else:
-    #        print(f"Crate {crate} had no build executable productions")
-    #        crates_with_no_files_of_interest.append(crate)
-    #    # TODO: in the crates_io cache which cloned pkgs don't build any 
-    #    #       files of interest so they are not rebuilt
 
 
-    #boring_crates = []
-    #if crates_with_no_interest.exists():
-    #    with open(crates_with_no_interest, 'r') as f:
-    #        boring_crates.extend(json.load(f)['names'])
-    #if boring_crates != []
-    #    with open(crates_with_no_interest, 'w') as f:
-    #        json.dump({'names': boring_crates},f)
-
-    #for binary in alive_it(bins):
-    #    try:
-
-    #        # TODO: Don't use an analyze function from here, 
-    #        #       use a function from ripbin
-
-    #        # Analyze the file
-    #        #analyze(binary,
-    #        #        'rust',
-    #        #        opt.value,
-    #        #        str(bit),
-    #        #        str(filetype),
-    #        #        )
-
-    #        #binary = Path(bin_path).resolve()
-    #        if not binary.exists():
-    #            print(f"Binary {binary} doesn't exist")
-    #            return
-
-    #        # Generate analysis
-    #        print("Generating Tensors...")
-    #        data = generate_minimal_labeled_features(binary)
-    #        print("Tensors generated")
-
-
-    #        # Create the file info
-    #        print("Calculating bin hash...")
-    #        binHash = calculate_md5(binary)
-    #        print("bin hash calculated...")
-
-
-    #        # TODO: Anlysis not being saved with target or ELF vs PE?
-
-
-    #        # Create the file info
-    #        info = RustFileBundle(binary.name,
-    #                              binHash,
-    #                              "",
-    #                              filetype,
-    #                              opt_lvl,
-    #                              binary.name,
-    #                              "",
-    #                              "")
-
-    #        print("Saving Tensor and binary")
-    #        # Save analyiss
-    #        save_analysis(binary,
-    #                        data,
-    #                        AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
-    #                        info,
-    #                        overwrite_existing=False)
-    #        print("Done!")
-    #    except Exception:
-    #        print(f"Error for file {binary}")
-    #        if stop_on_fail:
-    #            return
-    #        pass
 
 
 if __name__ == "__main__":

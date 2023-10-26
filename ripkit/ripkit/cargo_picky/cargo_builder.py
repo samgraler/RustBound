@@ -33,6 +33,7 @@ import subprocess
 from typing import Optional
 import os
 from .crates_io import LocalCratesIO
+from .picky_exceptions import CrateBuildException
 from .cargo_types import RustcTarget, CargoVariables, RustcStripFlags,\
                         RustcOptimization, Cargodb, FileType
 
@@ -108,8 +109,7 @@ def build_crate(crate: str,
                                         stderr=subprocess.DEVNULL,
                                          )
     except Exception as e:
-        print(f"Error: {e} Failed to rustc compile command.")
-        return
+        raise CrateBuildException
     return
 
 
