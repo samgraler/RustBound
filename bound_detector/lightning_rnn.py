@@ -2,6 +2,7 @@
     New model using sliding window size of bytes, and labeling 
     that window of bytes as a function start or not
 '''
+import lief
 import json
 import time
 from lightning.pytorch.cli import LightningCLI
@@ -42,7 +43,10 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import multiprocessing 
 CPU_COUNT = multiprocessing.cpu_count()
 
-#sys.path.append('../util_dev/ripbin')
+from ripkit.ripbin import (
+    get_functions,
+    generate_minimal_labeled_features,
+)
 #from ripbin import (
 #    get_registry, AnalysisType, ProgLang,
 #    generate_minimal_unlabeled_features,
@@ -58,18 +62,54 @@ class lit(pylight.LightningModule):
     def __init__(self, classifier:nn.Module, 
                  loss_func: nn.modules.loss._Loss, 
                  learning_rate: int,
+                 hidden_size: int,
+                 input_size: int,
+                 num_layers:int,
                  threshold: float =.9)->None:
         super().__init__()
         self.classifier = classifier
         self.loss_func = loss_func
         self.lr = learning_rate
         self.threshold = threshold
+        self.save_hyperparameters()
 
         self.metrics = [
             BinaryF1Score(threshold=threshold),
             BinaryPrecision(threshold=threshold),
             BinaryRecall(threshold=threshold),
         ]
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.rnn = nn.RNN(input_size, hidden_size, num_layers, 
+                          batch_first=True, bidirectional=True,
+                          nonlinearity='relu')
+                          #nonlinearity='gru')
+        #self.rnn = nn.GRU(input_size, hidden_size, num_layers, 
+        #                  batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden_size*2, 1)
+        self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax()
+        self.relu = nn.ReLU()
+
+    #def forward(self, x)->torch.Tensor:
+    #    '''
+    #        Forward method
+    #    '''
+    #    print(x)
+    #    param1 = self.num_layers * 2 
+    #    param2 = x.size(0)
+    #    param3 = self.hidden_size
+    #    #h0 = torch.zeros(self.num_layers * 2, x.size(0), 
+    #    #                 self.hidden_size).to(x.device)
+    #    h0 = torch.zeros(param1, param2, 
+    #                     param3).to(x.device)
+    #    out, _ = self.rnn(x, h0)
+    #    out = self.fc(out)
+    #    out = out.squeeze(dim=2)
+    #    out = torch.nan_to_num(self.sigmoid(out))
+    #    return out
+
+
 
     def reset_metrics(self)->None:
         self.metrics = [
@@ -572,7 +612,12 @@ def lit_model_train(input_files,
     # Binary cross entrophy loss
     loss_func = nn.BCELoss()
 
-    classifier = lit(model, loss_func, learning_rate)
+    classifier = lit(model,
+                     loss_func=loss_func,
+                     learning_rate=learning_rate,
+                     input_size=input_size,
+                     hidden_size=hidden_size,
+                     num_layers=layers)
 
     train_loader, valid_loader, test_loader = create_dataloaders(
             input_files, cache_file=cache_file,ends=False)
@@ -586,7 +631,7 @@ def lit_model_train(input_files,
     trainer.fit(classifier, train_loader, valid_loader)
 
     # TODO: Get metrics out of the test
-    trainer.test(classifier,dataloaders=test_loader)
+    trainer.test(classifier, dataloaders=test_loader)
 
     return classifier.metrics, classifier
 
@@ -632,9 +677,146 @@ def cli_main():
     cli = LightningCLI(classifier)
 
 
+
+
+#TODO: Way to test on a large dataset without having to load it all into
+# memory before running the test
+def large_test():
+    '''
+    '''
+
+    # The trainer takes a dataloader as a parameter
+    # So loop over all the files, create the dataloader 
+    # and run the test 
+
+    # Theory 1: 
+    #   - Use small dataloader 
+
+
+    return
+
+
+def rnn_predict(model, unstripped_bin):
+    # the rnn can predict chunks of 1000 bytes 
+
+    threshold = .9
+    metrics = [
+        BinaryF1Score(threshold=threshold),
+        BinaryPrecision(threshold=threshold),
+        BinaryRecall(threshold=threshold),
+    ]
+
+    tp = 0
+    tn = 0
+    fp = 0
+    fn = 0
+
+    data_gen = generate_minimal_labeled_features(unstripped_bin)
+    inp_chunk = []
+    lbl_chunk = []
+    for row in data_gen:
+        # Each row is 
+        #yield np.array([func_start, func_middle, func_end, *byte], dtype=np.bool_)
+
+        # convert the numpy list to row 
+        row_l = list(row)
+
+        lbl_chunk.append(row_l[0])
+        inp_chunk.append(row_l[3:])
+
+        if len(lbl_chunk) == 1000:
+            # make numpy matrix for this chunk
+            #lbl = np.array(np.array(lbl_chunk))
+            lbl = np.array(np.array(lbl_chunk))
+            #inp = np.array(np.array(inp_chunk))
+            inp = np.array([inp_chunk])
+
+            # The label is the first byte 
+            #   1 = start 
+            #   0 = end
+
+            # The input is the matrix of all the columns after the first 3
+            # columns 
+            # and all the rows
+            with torch.no_grad():
+                prediction = model(torch.Tensor(inp).to(DEVICE))
+
+            # Reset the chunk
+            lbl_chunk = []
+            inp_chunk = []
+
+            # Score the prediction
+
+            prediction = prediction.squeeze().to('cpu').numpy()
+            prediction[prediction >= 0.9] = 1
+            prediction[prediction < 0.9] = 0
+            target = lbl.squeeze()
+
+            tp += np.sum((prediction == 1) & (target == 1))
+            tn += np.sum((prediction == 0) & (target == 0))
+            fp += np.sum((prediction == 1) & (target == 0))
+            fn += np.sum((prediction == 0) & (target == 1))
+
+    return tp, tn, fp, fn 
+
+@app.command()
+def test_on(
+        testset_dir: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+        weights: Annotated[str, typer.Argument(
+                    help='File of bins')]):
+
+    # Make sure checkpoint exists
+    if not Path(weights).exists():
+        print(f"Path {weights} doesn't exist")
+        return
+
+    #learning_rate = 0.00005
+
+    #input_size=255
+    #hidden_size=16
+    #layers=1
+
+    #TODO: Load the model and give it hyper params
+
+    # Binary cross entrophy loss
+    #loss_func = nn.BCELoss()
+
+    # Load the pytorch lightning model from the checkpoints
+    lit_pylit = lit.load_from_checkpoint(weights)#,loss_func=loss_func,
+    #                                 learning_rate=learning_rate,
+    #                                 classifier=model)
+    model = lit_pylit.classifier
+    model.eval()
+
+    # make sure testdir exists 
+    testset_path = Path(testset_dir)
+    if not testset_path.exists():
+        print(f"Testset {testset_path} doesn't exist")
+        return
+
+    # Load the files from the test set 
+    testfiles = list(testset_path.glob('*'))
+
+    tp = 0
+    tn = 0
+    fp = 0
+    fn = 0
+    for file in alive_it(testfiles):
+        cur_tp, cur_tn, cur_fp, cur_fn = rnn_predict(model, file)
+        tp+=cur_tp
+        tn+=cur_tn
+        fp+=cur_fp
+        fn+=cur_fn
+        print(f"tp {tp} | tn {tn} | fp {fp} | fn {fn}")
+
+
+    return
+
+
 if __name__ == "__main__":
-    #cli_main()
-    #exit(1)
+    app()
+    exit(1)
 
     OPTIMIZATION = 'O0'
 
@@ -718,16 +900,7 @@ if __name__ == "__main__":
                                 shuffle=False,
                                 drop_last=True)#, num_workers=CPU_COUNT)
 
-    checkpoint_callback = ModelCheckpoint(
-        dirpath='checkpoints',
-        filename='best_{val_loss:.2}',
-        save_top_k=1,
-        monitor='val_loss',
-        mode='min',
-        save_last=True,
-    )
-
-    trainer = pylight.Trainer(callbacks=[checkpoint_callback],max_epochs=100)
+    trainer = pylight.Trainer(max_epochs=100)
 
     classifier.reset_metrics()
 

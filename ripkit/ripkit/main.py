@@ -776,6 +776,175 @@ def stats():
     return
 
 @app.command()
+def export_large_dataset(
+    bit: Annotated[int, typer.Argument()],
+    filetype: Annotated[str, typer.Argument()],
+    output_dir: Annotated[str, typer.Option(
+        help="Save the binaries to a directory")]="",
+    output_file: Annotated[str, typer.Option(
+        help="Save the binaries paths to a file")]="",
+    min_text_bytes: Annotated[int, typer.Option()]=2000,
+    drop_dups: Annotated[bool, typer.Option()]=True,
+    verbose: Annotated[bool, typer.Option]=False,
+    ):
+
+    out_to_dir = False
+    out_to_file = False
+
+    if output_dir != "":
+        out_to_dir = True
+
+        out_dir = Path(output_dir)
+
+        if out_dir.exists():
+            print("The output directory already exists, please remove it:!")
+            print("Run the following command if you are sure...")
+            print(f"rm -rf {out_dir.resolve()}")
+            return
+
+    if output_file != "":
+        out_to_file = True
+        out_file = Path(output_file)
+        if out_file.exists():
+            print("The output directory already exists, please remove it:!")
+            print("Run the following command if you are sure...")
+            print(f"rm -rf {out_file.resolve()}")
+            return
+
+
+    if not out_to_file and not out_to_dir:
+        print("No output to file or directory given")
+        return
+
+
+    # Get a dictionary of all the binaries that are in the ripbin db
+    org_bins = get_all_bins()
+
+    # Need to find all the bins that exist in each opt lvl
+    # and that are atleast the min number of bytes long
+
+    # For each optimization levels and its corresponding bin list:
+    # If any binary names appears more than once drop it
+    no_dups_bins = {k:[] for k in org_bins.keys()}
+
+    # A dictionary of all the binary names
+    dict_of_names = {k:[x.name for x in v] for k,v in org_bins.items()}
+
+    print("Finding binaries whose name occurs in opt lvls more than once...")
+
+    # 1. For each opt level drop all binaries 
+    #       where they're name appears more than once 
+    for opt_lvl, bin_list in org_bins.items():
+        print(f"[DUP] Before | {opt_lvl} | {len(bin_list)}")
+        # For each binary in the list of binaries 
+        for bin in bin_list:
+            # If this binary name appears exactly once, its 
+            # a good bin
+            if dict_of_names[opt_lvl].count(bin.name) == 1:
+                no_dups_bins[opt_lvl].append(bin)
+        print(f"[DUP] After | {opt_lvl} | {len(no_dups_bins[opt_lvl])}")
+
+
+    print("Finding binaries that don't match len requirement")
+    # New dict to hold bins that meet length requirement
+    good_len_bins = {}
+    short_bin_names = []
+
+    # Iterate over the dictionary of opt_lvl : [bins]
+    # where each list of bins has no duplicates
+    for opt_lvl, bins in no_dups_bins.items():
+        print(f"[LEN] Before | {opt_lvl} | {len(bins)}")
+        cur_good_bins = []
+        #TEMP_COUNT = 0
+        for bin in track(bins, description=f"Checking {opt_lvl} | {len(bins)} bin sizes..."):
+
+            #TEMP_COUNT+=1
+            #if TEMP_COUNT > 100:
+            #    break
+            # If the name of the binary has already been 
+            # found to be short in other opt lvls, don't 
+            # even consider it 
+            if bin.name in short_bin_names:
+                continue
+
+            # Parse the binary with lief
+            parsed_bin = lief.parse(str(bin.resolve()))
+
+            # Get the text section and the bytes themselse
+            text_section = parsed_bin.get_section(".text")
+            num_text_bytes = len(text_section.content)
+
+            # Append a good binary to the list of current good 
+            # binaries 
+            if num_text_bytes >= min_text_bytes:
+                cur_good_bins.append(bin)
+            else:
+                short_bin_names.append(bin.name)
+                print(f"[LEN] | SHORT | {opt_lvl} | {bin.name}")
+
+        print(f"[LEN] After | {opt_lvl} | {len(cur_good_bins)}")
+        good_len_bins[opt_lvl] = cur_good_bins
+
+    # Update the dict of names
+    dict_of_names = {k:[x.name for x in v] for k,v 
+                        in good_len_bins.items()}
+
+    print(f"[SET] Making sure binaries appear in all lvls")
+    # 3. Make sure the names of all the binaries 
+    #       exist in each opt lvl 
+    bins_set = []
+    for bin_list in dict_of_names.values():
+        if len(bins_set) == 0:
+            bins_set = bin_list
+        else:
+            bins_set = set(bins_set) & set(bin_list)
+
+
+    # Need the intersection of the names of all 
+    # opt lvls
+    set_of_names = list(bins_set)
+    final_bins = {}
+    print(f"[SET] Found {len(set_of_names)} in final set")
+
+    # remove files that are not in set_of_names
+    for opt_lvl, bin_list in no_dups_bins.items():
+        print(f"[SET] Before | {opt_lvl} | {len(bin_list)}")
+        good_bins = []
+        for bin in bin_list:
+            if bin.name in set_of_names:
+                good_bins.append(bin)
+
+        print(f"[SET] After | {opt_lvl} | {len(good_bins)}")
+        final_bins[opt_lvl] = good_bins
+        
+
+    # Write to the output file 
+    if out_to_file:
+        with open(output_file,'w') as f:
+            for key in final_bins.keys():
+                f.write(str(key)+"\n")
+                f.write("\n".join(str(bin.resolve()) for bin 
+                    in final_bins[key]))
+
+    # Write to output dir 
+    if out_to_dir:
+        out_dir = Path(output_dir)
+        out_dir.mkdir()
+        for key, bins in final_bins.items():
+            opt_out_dir = out_dir / f"{key}_lvl_bins"
+            opt_out_dir.mkdir()
+            for bin in track(bins, description=f"Copying {len(bins)} bins for opt {key}..."):
+                dest_file = opt_out_dir / bin.name
+                shutil.copy(bin.resolve(),dest_file.resolve())
+    return
+
+
+
+
+
+
+
+@app.command()
 def export_dataset(
     opt_lvl: Annotated[str, typer.Argument()],
     bit: Annotated[int, typer.Argument()],
