@@ -759,6 +759,136 @@ def rnn_predict(model, unstripped_bin):
 
     return tp, tn, fp, fn 
 
+
+@app.command()
+def train_on_first(
+        opt_lvl: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+
+        num_bins: Annotated[int, typer.Argument(
+                        help='Num bins to test on')],
+    ):
+
+    OPTIMIZATION = 'O2'
+
+    ##TODO: This is best used when I have large similar datasets for O0-Oz
+    ##       until I have all of those compiled I will manually split
+    ##with open("TEST_BIN_NAME_SET.json", 'r') as f:
+    ##    bin_names = json.load(f)['names']
+
+    ## 
+    rust_files = []
+
+    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+        info_file = parent / 'info.json'
+        info = {}
+        try:
+            with open(info_file, 'r') as f:
+                info = json.load(f)
+        except FileNotFoundError:
+            print(f"File not found: {info_file}")
+            continue
+        except json.JSONDecodeError as e:
+            print(f"JSON decoding error: {e}")
+            continue
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            continue
+
+
+        if info['optimization'].upper() in OPTIMIZATION:
+
+            bin_file  =  parent / info['binary_name']
+            if bin_file.exists():
+                rust_files.append(bin_file)
+
+    # Get the first x files
+    if len(rust_files) < num_bins:
+        print(f"Num bins too low {rust_files}")
+        return
+
+    # Get the first x files
+    first_x_files = rust_files[0:num_bins]
+
+    # Train on these files
+    metrics, classifier = lit_model_train(first_x_files)
+    print([x.compute() for x in metrics])
+
+    return
+
+
+@app.command()
+def train_without(
+        opt_lvl: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+        testset: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+    ):
+    opts = ['O0','O1','O2','O3','Z','S']
+
+    # TODO: verify this is how Oz and Os are lbls
+    if opt_lvl not in opts:
+        print(f"opt lbl must be in {opts}")
+        return
+
+    test_path = Path(testset).resolve()
+    if not test_path.exists():
+        print(f"PAth {test_path} does not exist")
+
+    rust_test_files = [ x.name for x in test_path.glob('*')]
+
+    rust_train_files = []
+
+    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+        info_file = parent / 'info.json'
+        info = {}
+        try:
+            with open(info_file, 'r') as f:
+                info = json.load(f)
+        except FileNotFoundError:
+            print(f"File not found: {info_file}")
+            continue
+        except json.JSONDecodeError as e:
+            print(f"JSON decoding error: {e}")
+            continue
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            continue
+
+
+        if info['optimization'].upper() in opt_lvl:
+            npz_file = parent / "onehot_plus_func_labels.npz"
+
+            if info['binary_name'] not in rust_test_files:
+                rust_train_files.append(npz_file)
+
+    metrics, classifier = lit_model_train(rust_train_files)
+    print([x.compute() for x in metrics])
+
+
+    # Create the dataloader for the test files now 
+    train_data, train_lbl= gen_one_hot_dataset(rust_train_files ,
+                                            num_chunks=1000)
+
+    trainer = pylight.Trainer(max_epochs=100)
+
+    classifier.reset_metrics()
+
+    # Get the run time of the module
+    start = time.time()
+    res = trainer.test(classifier,dataloaders=test_dataloader)
+    runtime = time.time() - start
+
+    print(f"Test on {len(rust_test_files)}")
+    metrics = [x.compute() for x in classifier.metrics]
+    print(metrics)
+    print(f"Run time for 1000 chunks on optimization {OPTIMIZATION}: {runtime}")
+    print(f"The len of train files was {len(rust_train_files)}")
+    print(f"The len of test files was {len(rust_test_files)}")
+
+
+    return
+
 @app.command()
 def test_on(
         testset_dir: Annotated[str, typer.Argument(
@@ -818,7 +948,7 @@ if __name__ == "__main__":
     app()
     exit(1)
 
-    OPTIMIZATION = 'O0'
+    OPTIMIZATION = 'O1'
 
     #TODO: This is best used when I have large similar datasets for O0-Oz
     #       until I have all of those compiled I will manually split

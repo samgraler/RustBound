@@ -49,6 +49,31 @@ from ripkit.ripbin import (
 )
 
 
+class CallBackException(Exception):
+    def __init__(self, message="Exception building crate"):
+        self.message = message 
+        super().__init__(self.message)
+
+
+def opt_lvl_callback(opt_lvl):
+    if opt_lvl == "O0":
+        opt = RustcOptimization.O0
+    elif opt_lvl == "O1":
+        opt = RustcOptimization.O1
+    elif opt_lvl == "O2":
+        opt = RustcOptimization.O2
+    elif opt_lvl == "O3":
+        opt = RustcOptimization.O3
+    elif opt_lvl == "Oz":
+        opt = RustcOptimization.OZ
+    elif opt_lvl == "Os":
+        opt = RustcOptimization.OS
+    else:
+        raise CallBackException("{} is an invalid optimization lvl".format(opt_lvl))
+    return opt
+
+
+
 def build_analyze_crate(crate, opt, target, filetype,
                         strip = RustcStripFlags.NOSTRIP,
                         use_cargo=True):
@@ -97,8 +122,6 @@ def build_analyze_crate(crate, opt, target, filetype,
 
     # Generate analysis
     data = generate_minimal_labeled_features(binary)
-
-    # TODO: Anlysis not being saved with target or ELF vs PE?
 
     try:
         # Save analyiss
@@ -206,157 +229,6 @@ def get_all_bins()->dict:
         else:
             bin_by_opt[opt].append(bin_file.resolve())
     return bin_by_opt
-
-
-
-
-#TODO: I don't think this should exist or be used 
-@app.command()
-def generate_unlbl_xda_in_files(
-    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    bit: Annotated[str, typer.Argument(help="32 or 64")],
-    filetype: Annotated[str, typer.Argument(help="pe or elf")],
-    ):
-    if opt_lvl == "O0":
-        opt = RustcOptimization.O0
-    elif opt_lvl == "O1":
-        opt = RustcOptimization.O1
-    elif opt_lvl == "O2":
-        opt = RustcOptimization.O2
-    elif opt_lvl == "O3":
-        opt = RustcOptimization.O3
-    elif opt_lvl == "Oz":
-        opt = RustcOptimization.OZ
-    elif opt_lvl == "Os":
-        opt = RustcOptimization.OS
-    else:
-        return
-
-    if bit == "64":
-        if filetype == "elf":
-            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
-        else:
-            return
-    elif bit == "32":
-        if filetype == "elf":
-            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.I686_PC_WINDOWS_GNU 
-        else:
-            return
-    else:
-        return
-
-    # List of all binaries to generate ground truth for 
-    files = []
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        info_file = parent / 'info.json'
-        info = {}
-        try:
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
-
-
-        if info['optimization'].upper() in opt.value.upper():
-            #npz_file = parent / "onehot_plus_func_labels.npz"
-
-            # Append the binary to files 
-            bin_path = parent / info['binary_name']
-            files.append(bin_path)
-
-    for file in alive_it(files):
-        # Parse every byte in the summary 
-        
-        # Write two columns in hex file 
-
-        # BYTE (in hext no 0x) | F or R or '-' F=start R=end '-'=neither
-        #save_lief_ground_truth(file)
-        gen_data_raw_func_bound(file, file.parent / 'xda_lbled_in')
-
-    return 
-
-@app.command()
-def generate_lief_ground_truth(
-    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    bit: Annotated[str, typer.Argument(help="32 or 64")],
-    filetype: Annotated[str, typer.Argument(help="pe or elf")],
-    ):
-    '''
-    Generate lief ground turth for all binarys in db of opt and target
-    '''
-    if opt_lvl == "O0":
-        opt = RustcOptimization.O0
-    elif opt_lvl == "O1":
-        opt = RustcOptimization.O1
-    elif opt_lvl == "O2":
-        opt = RustcOptimization.O2
-    elif opt_lvl == "O3":
-        opt = RustcOptimization.O3
-    elif opt_lvl == "Oz":
-        opt = RustcOptimization.OZ
-    elif opt_lvl == "Os":
-        opt = RustcOptimization.OS
-    else:
-        return
-
-    if bit == "64":
-        if filetype == "elf":
-            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
-        else:
-            return
-    elif bit == "32":
-        if filetype == "elf":
-            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.I686_PC_WINDOWS_GNU 
-        else:
-            return
-    else:
-        return
-
-    # List of all binaries to generate ground truth for 
-    files = []
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        info_file = parent / 'info.json'
-        info = {}
-        try:
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
-
-
-        if info['optimization'].upper() in opt.value.upper():
-            #npz_file = parent / "onehot_plus_func_labels.npz"
-
-            # Append the binary to files 
-            bin_path = parent / info['binary_name']
-            files.append(bin_path)
-
-    for file in alive_it(files):
-        save_lief_ground_truth(file)
-
-    return 
 
 @app.command()
 def list_functions(
@@ -493,20 +365,11 @@ def build(
     # b/c theres many different ways to get
     # a 64bit pe  or 32bit elf 
 
-    if opt_lvl == "O0":
-        opt = RustcOptimization.O0
-    elif opt_lvl == "O1":
-        opt = RustcOptimization.O1
-    elif opt_lvl == "O2":
-        opt = RustcOptimization.O2
-    elif opt_lvl == "O3":
-        opt = RustcOptimization.O3
-    elif opt_lvl == "Oz":
-        opt = RustcOptimization.OZ
-    elif opt_lvl == "Os":
-        opt = RustcOptimization.OS
-    else:
-        print("UNknown opt")
+    # Opt lvl call back 
+    try:
+        opt = opt_lvl_callback(opt_lvl)
+    except Exception as e:
+        print(e)
         return
 
     if bit == "64":
@@ -563,20 +426,13 @@ def build_all(
     # b/c theres many different ways to get
     # a 64bit pe  or 32bit elf 
 
-    if opt_lvl == "O0":
-        opt = RustcOptimization.O0
-    elif opt_lvl == "O1":
-        opt = RustcOptimization.O1
-    elif opt_lvl == "O2":
-        opt = RustcOptimization.O2
-    elif opt_lvl == "O3":
-        opt = RustcOptimization.O3
-    elif opt_lvl == "Oz":
-        opt = RustcOptimization.OZ
-    elif opt_lvl == "Os":
-        opt = RustcOptimization.OS
-    else:
+    # Opt lvl call back 
+    try:
+        opt = opt_lvl_callback(opt_lvl)
+    except Exception as e:
+        print(e)
         return
+
 
     if bit == "64":
         if filetype == "elf":
@@ -931,9 +787,13 @@ def export_dataset(
     Create a file containing the absolute paths to the binaries
     '''
 
-    if opt_lvl not in ['0','1','2','3','z','s']:
-        print("opt lvl must be 0 1 2 3 z s")
+    # Opt lvl call back 
+    try:
+        opt = opt_lvl_callback(opt_lvl)
+    except Exception as e:
+        print(e)
         return
+    opt = opt.value.upper()
 
     out_to_dir = False
     out_to_file = False
@@ -963,8 +823,6 @@ def export_dataset(
         print("No output to file or directory given")
         return
 
-        return
-
     # Get a dictionary of all the binaries that are in the ripbin db
     bins = get_all_bins()
 
@@ -973,14 +831,14 @@ def export_dataset(
 
     # Create the set of binary names that ripbin has a binary for as long 
     # as the binary has been compiled for all optimization levels
-    set_of_names = set([x.name for x in bins[opt_lvl]])
+    set_of_names = set([x.name for x in bins[opt]])
     for key in bins.keys():
         set_of_names= set_of_names.intersection([x.name for x in bins[key]])
 
     print(f"Found {len(set_of_names)} bins that are present in all opt lvls")
 
     # Get a list of pathlib objects for the binaries 
-    potential_bins = [x for x in bins[opt_lvl] if x.name in set_of_names]
+    potential_bins = [x for x in bins[opt] if x.name in set_of_names]
 
     #TODO: Binary files can have the same name if they come from different 
     #       packages, for now I'm not allowing these to be in any dataset
@@ -1030,21 +888,15 @@ def build_analyze_all(
     '''
     Build and analyze pkgs
     '''
-    if opt_lvl == "O0":
-        opt = RustcOptimization.O0
-    elif opt_lvl == "O1":
-        opt = RustcOptimization.O1
-    elif opt_lvl == "O2":
-        opt = RustcOptimization.O2
-    elif opt_lvl == "O3":
-        opt = RustcOptimization.O3
-    elif opt_lvl == "Oz":
-        opt = RustcOptimization.OZ
-    elif opt_lvl == "Os":
-        opt = RustcOptimization.OS
-    else:
-        print("Invalid opt lvl")
+
+
+    # Opt lvl call back 
+    try:
+        opt = opt_lvl_callback(opt_lvl)
+    except Exception as e:
+        print(e)
         return
+
 
     if not build_arm:
         if bit == 64:
@@ -1153,7 +1005,6 @@ def build_analyze_all(
             print(f"[SUCCESS] crate {crate}")
 
     print(f"Total build success: {success}")
-
 
 
 
