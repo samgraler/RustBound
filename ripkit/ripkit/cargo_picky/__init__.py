@@ -46,4 +46,8 @@ from .cargo_types import (
     CargoVariables,
     RustcTarget,
 )
+
+from .picky_exceptions import (
+    CrateBuildException,
+)
     

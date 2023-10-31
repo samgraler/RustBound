@@ -695,15 +695,7 @@ def stats():
     Print stats about the rippe binaries
     '''
 
-    stats = {
-        'total':0,
-        'num_opt0': 0,
-        'num_opt1': 0,
-        'num_opt2': 0,
-        'num_opt3': 0,
-        'num_optz': 0,
-        'num_opts': 0,
-    }
+    stats = { }
 
     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
         info_file = parent / 'info.json'
@@ -721,23 +713,33 @@ def stats():
             print(f"An error occurred: {e}")
             continue
 
+        if info['target'] not in stats.keys():
+            stats[info['target']] = [0 for _ in range(6)]
+
+
         if '0' in info['optimization']:
-            stats['num_opt0']+=1
+            stats[info['target']][0]+=1
         if '1' in info['optimization']:
-            stats['num_opt1']+=1
+            stats[info['target']][1]+=1
         if '2' in info['optimization']:
-            stats['num_opt2']+=1
+            stats[info['target']][2]+=1
         if '3' in info['optimization']:
-            stats['num_opt3']+=1
+            stats[info['target']][3]+=1
         if 'z' in info['optimization']:
-            stats['num_optz']+=1
+            stats[info['target']][4]+=1
         if 's' in info['optimization']:
-            stats['num_opts']+=1
+            stats[info['target']][5]+=1
 
-        stats['total'] +=1
+    for key, counters in stats.items():
+        print(f"{key}")
+        for i, count in enumerate(counters):
+            if i <=3:
+                print(f"{i} was {count}")
+            elif i ==4 :
+                print(f"z was {count}")
+            elif i ==5 :
+                print(f"s was {count}")
 
-    for key, value in stats.items():
-        print(f"{key} = {value}")
     return
 
 @app.command()
