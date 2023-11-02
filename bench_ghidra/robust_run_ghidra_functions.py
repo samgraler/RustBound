@@ -593,8 +593,15 @@ def NEW_ghidra_bench_functions(
     #nonstrip_v_strip = list_operations(nonstrip_func_addrs, gnd_addrs)
 
     nonstrip_v_truth = list_operations_raw_values(nonstrip_func_addrs, gnd_addrs)
+
+    print("NONSTRIP !!!!!!!!!!!!!!!!!!!!!!!!!")
+    print(f"Nonstrip TP: {len(nonstrip_v_truth[0])}")
+
     strip_v_truth = list_operations_raw_values(strip_func_addrs, gnd_addrs)
     nonstrip_v_strip = list_operations_raw_values(nonstrip_func_addrs, gnd_addrs)
+
+    print("NONSTRIP !!!!!!!!!!!!!!!!!!!!!!!!!")
+    print(f"AGAIN Nonstrip TP: {len(nonstrip_v_truth[0])}")
 
     print("HHHHHHHHHHHHHHHEEEEEEEEEEEEEEEEEEEEEEEEEEEERRRRRRR")
     print(f" strip_v_truch...")
@@ -1241,7 +1248,7 @@ def timed_bench_all(
         with open('XDA_DATASET_SPLITS', 'r') as f:
             list_o_bins = [x.strip() for x in f.read().split(',')]
 
-        print(list_o_bins)
+        #print(list_o_bins)
         print(f"Using {len(list_o_bins)} bins")
 
     opt_lvls = ['O0','O1', 'O2', 'O3','OS', 'OZ']
@@ -1344,24 +1351,37 @@ def timed_bench_all(
 
             # False Negative - Functions in nonstrip that arent in strip
             #false_neg = res['strip_v_gnd'].b_only
-            false_neg = res['strip_v_gnd'][2]
+            false_neg = res['nonstrip_v_gnd'][2]
             tot_false_neg += len(false_neg)
 
             # False Positive
             #false_pos = res['strip_v_gnd'].a_only
-            false_pos = res['strip_v_gnd'][1]
+            false_pos = res['nonstrip_v_gnd'][1]
             tot_false_pos += len(false_pos)
 
             # True Positive
-            true_pos = res['strip_v_gnd'][0]
+            true_pos = res['nonstrip_v_gnd'][0]
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            print(f"DIFFERENT TURE POS {true_pos}")
             tot_true_pos += len(true_pos)
 
             # Recall 
             # Precision 
             # F1
-            recall = len(true_pos) / (len(true_pos) + len(false_neg))
-            precision = len(true_pos) / (len(true_pos) + len(false_pos))
-            f1 = 2 * precision * recall / (precision+recall)
+            if len(true_pos) + len(false_neg) != 0 :
+                recall = len(true_pos) / (len(true_pos) + len(false_neg))
+            else:
+                recall = 0
+
+            if len(true_pos) + len(false_pos) != 0 :
+                precision = len(true_pos) / (len(true_pos) + len(false_pos))
+            else: 
+                precision = 0
+
+            if precision+recall != 0 :
+                f1 = 2 * precision * recall / (precision+recall)
+            else:
+                f1 = 0
 
             # FAlse neg - only in ghida
             #noa_false_neg = noanalysis_res['strip_v_gnd'].b_only
@@ -1383,30 +1403,34 @@ def timed_bench_all(
             noa_recall = len(noa_true_pos) / (len(noa_true_pos) + len(noa_false_neg))
             noa_precision = len(noa_true_pos) / (len(noa_true_pos) + len(noa_false_pos))
             noa_f1 = 2 * noa_precision * noa_recall / (noa_precision+noa_recall)
+            if verbose:
+                print(f"Bin {bin_path.name}")
+                print(f"|Analysis.......")
+                print(f"|F1: {f1}")
+                print(f"|Prec: {precision}")
+                print(f"|recall: {recall}")
+                print(f">|No Analysis.......")
+                print(f">|F1: {noa_f1}")
+                print(f">|Prec: {noa_precision}")
+                print(f">|recall: {noa_recall}")
 
 
 
             data = {
                 'name': bin_path.name,
-                'true_pos' : list(true_pos),
-                'false_neg': list(false_neg),
-                'false_pos': list(false_pos),
-                'recall' : recall,
-                'precision' : precision,
-                'f1' : f1,
+                'true_pos' : len(true_pos),
+                'false_neg': len(false_neg),
+                'false_pos': len(false_pos),
                 #'nonstripped_wall_time': res[2][0],
                 'nonstripped_wall_time': int(res['nonstrip_runtime']),
                 #'stripped_wall_time': res[2][1],
                 'stripped_wall_time': int(res['strip_runtime']),
                 #------------------
-                'noanalysis_true_pos' :  list(noa_true_pos),
-                'noanalysis_false_neg':  list(noa_false_neg),
-                'noanalysis_false_pos':  list(noa_false_pos),
-                'noanalysis_recall' :    noa_recall,
-                'noanalysis_precision' : noa_precision,
-                'noanalysis_f1' : noa_f1,
-                'noanalysis_nonstripped_wall_time': noanalysis_res['nonstrip_runtime'],
-                'noanalysis_stripped_wall_time': noanalysis_res['strip_runtime'],
+                'noanalysis_true_pos' :  len(noa_true_pos),
+                'noanalysis_false_neg':  len(noa_false_neg),
+                'noanalysis_false_pos':  len(noa_false_pos),
+                'noanalysis_nonstripped_wall_time': float(noanalysis_res['nonstrip_runtime']),
+                'noanalysis_stripped_wall_time': float(noanalysis_res['strip_runtime']),
             }
 
 
@@ -1456,8 +1480,12 @@ def read_timed_summary(
     file: Annotated[str, typer.Argument()],
     #opt_lvl: Annotated[str, typer.Argument()],
     show_diff: Annotated[bool, typer.Option()]=False,
+    # TODO: Ability to provide a list of binary names 
+    #       that I want the summary of 
+    #       so that I can provide the exact lis tthat the 
+    #       rnn was tested on 
     binary_name_file: Annotated[str, 
-                typer.Option(help='json file with bin names to include')] = '',
+                typer.Option(help='test file with bin names to include')] = '',
     ):
 
 
@@ -1468,8 +1496,10 @@ def read_timed_summary(
             print(f"Binary name file {binary_name_file} does not exist")
             return
         with open(bin_name_file, 'r') as f:
-            binary_names = f.readlines()
-            #binary_names = json.load(f)['names']
+            for line in f.readlines():
+                binary_names.append(line.strip())
+
+        print(f"Loaded {len(binary_names)} from bin file")
 
     log_path = Path(file)
     if not log_path.exists():
@@ -1487,6 +1517,8 @@ def read_timed_summary(
     false_positive = 0
     false_negative= 0
     true_positive = 0
+    concat_false_pos = []
+    concat_false_neg = []
     noa_stripped_time = 0
     noa_nonstripped_time = 0
     noa_false_positive = 0
@@ -1495,70 +1527,75 @@ def read_timed_summary(
     total_files = 0
 
 
-    # 
+
     for _, bin_data in data.items():
         if binary_names != []:
             if bin_data['name'] not in binary_names:
                 continue
 
-        # Read the tp tn fp fn and runtime for each file 
-        #   - stripped
-        #   - not stripped 
         total_files += 1
+        # Unqiue functions in non-strip: Missed funcs 
+        #                           -or- False Negative
+        # Unqiue funciotns in strip: False Positive
 
-        # Anaylsis wall times 
+        # Non-unique functions in strip: True Positive
         stripped_time += bin_data['stripped_wall_time']
         nonstripped_time += bin_data['nonstripped_wall_time']
 
-        # No anaylsis wall times 
+        false_positive += len(bin_data['false_pos'])
+        false_negative += len(bin_data['false_neg'])
+        true_positive += len(bin_data['true_pos'])
+
         noa_stripped_time += bin_data['noanalysis_stripped_wall_time']
         noa_nonstripped_time += bin_data['noanalysis_nonstripped_wall_time']
 
-        # Analysis tp, fp and fn 
-        false_positive += bin_data['false_pos']
-        false_negative += bin_data['false_neg']
-        true_positive += bin_data['true_pos']
+        noa_false_positive += len(bin_data['noanalysis_false_pos'])
+        noa_false_negative += len(bin_data['noanalysis_false_neg'])
+        noa_true_positive +=  len(bin_data['noanalysis_true_pos'])
+        if show_diff:
+            concat_false_neg.extend(bin_data['false_neg'])
+            concat_false_pos.extend(bin_data['false_pos'])
 
-        # No Analysis tp, fp and fn 
-        noa_false_positive += bin_data['noanalysis_false_pos']
-        noa_false_negative += bin_data['noanalysis_false_neg']
-        noa_true_positive +=  bin_data['noanalysis_true_pos']
-
-
-    # Get the total number of functions in the non stripped files
     total_funcs = true_positive + false_negative
 
-    # Anaylsis f1 prec and recall
+    # metrics
     recall = true_positive / (true_positive + false_negative)
     precision = true_positive / (true_positive + false_positive)
     f1 = 2 * precision * recall / (precision+recall)
 
-    # Get the total number of functions in the non stripped files no anaylsis
     noa_total_funcs = noa_true_positive + noa_false_negative
 
-    # No Anaylsis f1 prec and recall
+    # metrics
     noa_recall = noa_true_positive / (noa_true_positive + noa_false_negative)
     noa_precision = noa_true_positive / (noa_true_positive + noa_false_positive)
     noa_f1 = 2 * noa_precision * noa_recall / (noa_precision+noa_recall)
 
+
+
+    if show_diff:
+        for name_addr in concat_false_pos:
+            print(f"{name_addr[0]:>4} | {name_addr[1]}: False pos")
+        for name_addr in concat_false_neg:
+            print(f"{name_addr[0]:>4} | {name_addr[1]}: False neg")
+
     print("Stats:")
     print("==================")
     print("With analysis:")
-    print(f"Number of functions: {total_funcs}")
-    print(f"Funcs correctly identified: {true_positive}")
-    print(f"False neg: {false_negative}")
-    print(f"False pos: {false_positive}")
-    print(f"Number of files: {total_files}")
-    print(f"Precision {precision}")
-    print(f"Recall: {recall}")
-    print(f"F1: {f1}")
-    print(f"Time, nonstripped: {nonstripped_time}")
-    print(f"Time, stripped: {stripped_time}")
+    print("--------------")
+    print(f"| TP: {true_positive}")
+    print(f"| FN: {false_negative}")
+    print(f"| FP: {false_positive}")
+    print(f"| Number of files: {total_files}")
+    print(f"| Precision {precision}")
+    print(f"| Recall: {recall}")
+    print(f"| F1: {f1}")
+    print(f"| Time, nonstripped: {nonstripped_time}")
+    print(f"| Time, stripped: {stripped_time}")
     print("Without analysis:")
-    print(f"Number of functions: {noa_total_funcs}")
-    print(f"Funcs correctly identified: {noa_true_positive}")
-    print(f"False neg: {noa_false_negative}")
-    print(f"False pos: {noa_false_positive}")
+    print("---0-------------")
+    print(f"TP: {noa_true_positive}")
+    print(f"FN: {noa_false_negative}")
+    print(f"FP: {noa_false_positive}")
     print(f"Number of files: {total_files}")
     print(f"Precision {noa_precision}")
     print(f"Recall: {noa_recall}")
@@ -1566,6 +1603,9 @@ def read_timed_summary(
     print(f"Time, nonstripped: {noa_nonstripped_time}")
     print(f"Time, stripped: {noa_stripped_time}")
     return
+
+
+
 
 
 
