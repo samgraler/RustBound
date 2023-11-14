@@ -14,6 +14,13 @@ import sys
 import lief
 import numpy as np
 
+from rich.console import Console
+from rich.table import Table
+from rich.progress import track
+
+console = Console()
+
+
 #from ripkit.cargo_picky import (
 #  is_executable,
 #)
@@ -26,6 +33,7 @@ from ripkit.ripbin import (
     get_functions,
 )
 import typer
+
 app = typer.Typer()
 
 
@@ -98,6 +106,7 @@ def call_ghidra(
     cmd_base_str = [f"{analyzer.parent}/./{analyzer.name}", "/tmp", 
                "tmp_proj", "-import", f"{bin_path}"]
 
+    print(f"GHID ARGS {ghid_args}")
     for x in ghid_args:
         cmd_base_str.append(x)
 
@@ -130,6 +139,8 @@ def get_ghidra_functions(bin_path, post_script: Path =
 
     # Add to the flags
     other_flags.extend(['-postScript', f'{post_script.resolve()}'])
+
+    print(f"FLAGS: {other_flags}")
 
     # Run ghidra 
     res = call_ghidra(bin_path, other_flags)
@@ -317,6 +328,80 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
 
     return same, lief_only, ghid_only
 
+@app.command()
+def read_comparison_dir(
+    dir : Annotated[str,typer.Argument()],
+    ):
+
+
+    keys = ['tp', 'fp', 'fn']
+
+    analyzed = { k: 0 for k in keys}
+    not_analyzed = { k: 0 for k in keys}
+
+    for file in alive_it(Path(dir).glob('*')):
+        # IF STRIPPED in name it was stripped 
+        # IF analysis in the name it was anaylzed
+
+        data = {}
+        with open(file, 'r') as f:
+            data = json.load(f)
+
+        if data == {}:
+            continue
+
+        if "NOANALYSIS" in file.name:
+            was_analyzed = False
+        else:
+            was_analyzed = True
+        
+        if "STRIPPED" in file.name:
+            stripped = True
+        else:
+            stripped = False
+
+
+        if stripped and was_analyzed:
+            analyzed['tp'] += len(data['same'])
+            analyzed['fp'] += len(data['ghid_only'])
+            analyzed['fn'] += len(data['lief_only'])
+
+
+        if stripped and not was_analyzed:
+            not_analyzed['tp'] += len(data['same'])
+            not_analyzed['fp'] += len(data['ghid_only'])
+            not_analyzed['fn'] += len(data['lief_only'])
+        # Count the total tp, fp, fn for each category:
+        # stripped, analyzed
+        # stripped, no_analysis
+
+    print("ANALYZED:")
+    for key in analyzed.keys():
+        print(f"{key} : {analyzed[key]}")
+
+    prec = analyzed['tp']/(analyzed['tp']+analyzed['fp'])
+    recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
+    f1 = 2 * prec* recall / (prec+recall)
+
+    print(f"Prec: {prec}")
+    print(f"Recall: {recall}")
+    print(f"F1 : {f1}")
+
+
+    print("+=====================+")
+    print("NOT ANALYZED:")
+    for key in analyzed.keys():
+        print(f"{key} : {not_analyzed[key]}")
+
+    prec = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fp'])
+    recall = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fn'])
+    f1 = 2 * prec* recall / (prec+recall)
+    print(f"Prec: {prec}")
+    print(f"Recall: {recall}")
+    print(f"F1 : {f1}")
+
+    return
+
 def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:bool, out_file:Path):
     """
     Save the comparison to a result json
@@ -381,9 +466,9 @@ def cli_test(
 @app.command()
 def batch_test_ghidra(
         binary_dir: Annotated[str, typer.Argument()],
+        save_results_dir: Annotated[str,typer.Option()],
         noanalysis: Annotated[bool, typer.Option()]=False,
         strip_file: Annotated[bool,typer.Option()]=False,
-        save_results_dir: Annotated[str,typer.Option()]=None,
         show_running_res: Annotated[bool, typer.Option()]=False,
     ):
 
@@ -418,11 +503,14 @@ def batch_test_ghidra(
         # Make the flags list 
         if noanalysis:
             flags = ["-noanalysis"]
+            print("analysis OFF")
         else:
+            print("analysis ON")
             flags = []
 
         # Run the ghidra compare
-        same, ghid_only, lief_only = test_lief_v_ghid(bin, flags, strip_file)
+        same, ghid_only, lief_only = test_lief_v_ghid(bin, 
+                                            flags, strip_file)
         tp += len(same)
         fn += len(lief_only)
         fp += len(ghid_only)
@@ -1061,6 +1149,8 @@ def read_summary(
         print(f"No file {log_path}")
         return
 
+    # Init the data dict
+    data = {}
 
     # Read json data 
     with open(log_path,'r') as f:

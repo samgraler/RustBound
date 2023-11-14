@@ -16,6 +16,7 @@ python-magic = "^0.4.27"
 pefile = "^2023.2.7"
 pyelftools = "^0.30"
 capstone = "^5.0.1"
+rich = "^13.6.0"
 
 
 [build-system]
