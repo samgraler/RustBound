@@ -119,10 +119,18 @@ def call_ghidra(
         paths_to_remove = [Path(x) for x in paths_to_remove]
         remove_paths(paths_to_remove)
 
+        # Record the start time of the ghidra process 
+        start = time.time()
+
+        # Run the ghidra commad, capturing all of its output
         output = subprocess.run(cmd_str, text=True,
                                 capture_output=True,
                                 universal_newlines=True)
-        return output
+
+        # Get the runtime 
+        runtime = start - time.time()
+
+        return output, runtime
     except subprocess.CalledProcessError as e:
         print(f"COMMAND IS : {cmd_str}")
         print("Error running command:", e)
@@ -142,15 +150,20 @@ def get_ghidra_functions(bin_path, post_script: Path =
 
     print(f"FLAGS: {other_flags}")
 
+    # Start time of process
+    start = time.time()
+
     # Run ghidra 
-    res = call_ghidra(bin_path, other_flags)
+    res, runtime = call_ghidra(bin_path, other_flags)
+
+
 
     # If it was a good run read the stdout
     #TODO: Check for bad run 
     res = res.stdout
 
     # Parse for functions and return the functions
-    return parse_for_functions(res)
+    return parse_for_functions(res), runtime
 
 
 def append_bnext(inp_list):
@@ -277,10 +290,8 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
         bin_path = gen_strip_file(bin_path)
 
     # Get the functons from ghidra 
-    ghidra_functions = get_ghidra_functions(bin_path,
+    ghidra_functions, runtime = get_ghidra_functions(bin_path,
                                     other_flags=ghidra_flags)
-
-
 
     #TODO: Offset 
     # Need to apply the offset to the ghidra functions 
@@ -302,6 +313,7 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
         (x-offset) >= min(lief_functions.addresses) and 
         (x-offset) <= max(lief_functions.addresses)]
 
+    # BUG: The offset 
     # TODO: This is related to the above, find out exactly when the offset
     #       needs to be applied
     use_offset = True
@@ -326,7 +338,7 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
     if strip_file:
         bin_path.unlink()
 
-    return same, lief_only, ghid_only
+    return same, lief_only, ghid_only, runtime
 
 @app.command()
 def read_comparison_dir(
@@ -402,7 +414,7 @@ def read_comparison_dir(
 
     return
 
-def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:bool, out_file:Path):
+def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:bool, out_file:Path, runtime: int):
     """
     Save the comparison to a result json
     """
@@ -415,6 +427,7 @@ def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:
         'same' : same.tolist(),
         'ghid_only' : ghid_only.tolist(),
         'lief_only' : lief_only.tolist(),
+        'runtime' : runtime,
     }
 
     # Dump the file to the json file
@@ -447,10 +460,10 @@ def cli_test(
         flags = []
 
     # Run the ghidra compare
-    same, ghid_only, lief_only = test_lief_v_ghid(bin_path,flags, strip_file)
+    same, ghid_only, lief_only, runtime = test_lief_v_ghid(bin_path,flags, strip_file)
 
     if save_results is not None:
-        save_comparison(bin_path, strip_file, same, ghid_only, lief_only, noanalysis, Path(save_results))
+        save_comparison(bin_path, strip_file, same, ghid_only, lief_only, noanalysis, Path(save_results), runtime)
 
     if show_summary:
         # Calc metrics
@@ -509,22 +522,26 @@ def batch_test_ghidra(
             flags = []
 
         # Run the ghidra compare
-        same, ghid_only, lief_only = test_lief_v_ghid(bin, 
+        same, ghid_only, lief_only, runtime = test_lief_v_ghid(bin, 
                                             flags, strip_file)
         tp += len(same)
         fn += len(lief_only)
         fp += len(ghid_only)
 
         if show_running_res:
+            tot_bytes = len(lief_only) + len(same)
             print(f"tp: {tp}")
             print(f"fp: {fn}")
             print(f"fn: {fp}")
+            print(f"Runtime: {runtime}")
+            print(f"Total bytes: {tot_bytes}")
+            print(f"Byte per second = {runtime/tot_bytes}")
 
         # define the result path 
         result_path = save_path / Path(f"{bin.name}_{strip_post}_{analysis_post}")
 
         # Save the results
-        save_comparison(bin, strip_file, same, ghid_only, lief_only, noanalysis, result_path)
+        save_comparison(bin, strip_file, same, ghid_only, lief_only, noanalysis, result_path, runtime)
     return
 
 
@@ -930,154 +947,6 @@ def NEW_ghidra_bench_functions(
     return result 
  
 
-
-    
-#def ghidra_bench_functions(
-#    bin_path: Path, 
-#    post_script: Path = Path("~/ghidra_scripts/List_Function_and_Entry.py").expanduser(),
-#    script_path: Path = Path("~/ghidra_scripts/").expanduser(),
-#    analyzer: Path = 
-#    Path("~/ghidra_10.3.3_PUBLIC/support/analyzeHeadless").expanduser().resolve(),
-#    verbose=False):
-#
-#    # Load ground truth 
-#    ground_truth = parse_ground_truth(bin_path)
-#    gnd_addrs = [x[0] for x in ground_truth]
-#
-#    # Run ghidra and get the address of the function and the runtime 
-#    # for ghidra's analysis
-#    nonstrip_funcs, nonstrip_runtime = func_addrs_timed_bench(bin_path,
-#                                post_script, script_path, analyzer)
-#
-#    # Find the offset for the ghidra addrs and apply it
-#    offset =  find_ghidra_offset(ground_truth, nonstrip_funcs)
-#
-#    nonstrip_func_addrs = [x-offset for x in nonstrip_funcs
-#            if x-offset > min(gnd_addrs) and 
-#                x-offset < max(gnd_addrs)]
-#
-#
-#    # Copy the bin and strip it 
-#    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
-#    shutil.copy(bin_path, Path(strip_bin))
-#
-#    try:
-#        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
-#    except subprocess.CalledProcessError as e:
-#        print("Error running command:", e)
-#        return []
-#
-#    # Run ghidra on stripped bin and get function list - and time it 
-#    strip_res, strip_runtime = timed_ghidra_run(strip_bin , post_script, script_path, analyzer)
-#
-#    #TODO: Why doesn't ghidra apply the offset for the 
-#    #   stripped version of files
-#    strip_funcs = parse_for_functions(strip_res.stdout)
-#
-#    # Delete the stripped binary
-#    strip_bin.unlink()
-#
-#    # Only include the addrs that are in the .text section
-#    strip_func_addrs = [x[1] for x in strip_funcs if 
-#        x[1] > min(gnd_addrs) and x[1] < max(gnd_addrs) 
-#    ]
-#
-#    # Get the overlaps and unique values in the lists
-#    nonstrip_v_truth = list_operations(nonstrip_func_addrs, gnd_addrs)
-#    strip_v_truth = list_operations(strip_func_addrs, gnd_addrs)
-#    nonstrip_v_strip = list_operations(nonstrip_func_addrs, gnd_addrs)
-#
-#    if verbose:
-#        print(f"Lief first func : {min(ground_truth)}")
-#        print(f"Ghid first func : {min(nonstrip_func_addrs)}")
-#              
-#        print(f"Total lief functions {len(ground_truth)}")
-#        print(f"Total ghidra in .text {len(nonstrip_func_addrs)}")
-#
-#        print(f"Nonstrip: {len(nonstrip_v_truth.intersection)} true pos")
-#        print(f"Nonstrip: {len(nonstrip_v_truth.b_only)} false neg")
-#        print(f"Nonstrip: {len(nonstrip_v_truth.a_only)} false pos")
-#
-#        print(f"strip: {len(strip_v_truth.intersection)} tru pos")
-#        print(f"strip: {len(strip_v_truth.b_only)} false neg")
-#        print(f"strip: {len(strip_v_truth.a_only)} false pos")
-#
-#    result = {
-#            'nonstrip_v_gnd' : nonstrip_v_truth,
-#            'strip_v_gnd' : strip_v_truth,
-#            'nonstrip_v_strip' : nonstrip_v_strip,
-#            'nonstrip_runtime' : nonstrip_runtime,
-#            'strip_runtime' : strip_runtime,
-#            }
-#
-#    # Return a list of functions for each, and unqiue functions for each
-#    #TODO: Change every func that depends on this
-#    return result 
-    #return [(nonstrip_funcs, unique_nonstrip), (strip_funcs, unique_strip), (nonstrip_runtime, strip_runtime)]
-
-
-
-#def open_and_read_log(log_path: Path = Path("GHIDRA_BENCH_RESULTS.json")):
-#
-#    # Read json data 
-#    with open(log_path,'r') as f:
-#        data = json.load(f)
-#
-#    # Totals 
-#    total_strip_unique = 0
-#    total_non_strip_unique = 0
-#    total_funcs = 0
-#    total_strip_non_unique  = 0
-#    for _, bin_data in data.items():
-#        # Unqiue functions in non-strip: Missed funcs 
-#        #                           -or- False Negative
-#        # Unqiue funciotns in strip: False Positive
-#
-#        # Non-unique functions in strip: True Positive
-#
-#        total_strip_unique += bin_data['strip_unique_funcs']
-#        total_non_strip_unique += bin_data['nonstrip_unique_funcs']
-#        total_strip_non_unique += bin_data['strip_funcs']
-#        total_funcs += bin_data['nonstrip_funcs']
-#
-#    false_negative = total_non_strip_unique
-#    false_positive = total_strip_unique
-#
-#    # Every thing that correctly labeled
-#    true_positive = total_strip_non_unique
-#
-#
-#    # Recall 
-#    recall = true_positive / (true_positive + false_negative)
-#
-#    # Precision 
-#    precision = true_positive / (true_positive + false_positive)
-#
-#    # F1
-#    f1 = 2 * precision * recall / (precision+recall)
-#
-#
-#    print("Stats:")
-#    print("==================")
-#    print(f"Number of functions: {total_funcs}")
-#    print(f"Funcs correctly identified: {true_positive}")
-#    print(f"False neg: {false_negative}")
-#    print(f"False pos: {false_positive}")
-#    print(f"strip unique: {total_strip_unique}")
-#    print(f"nonstrip unique: {total_non_strip_unique}")
-#    print(f"Number of files: {len(data.keys())}")
-#    print(f"Precision {precision}")
-#    print(f"Recall: {recall}")
-#    print(f"F1: {f1}")
-
-
-#    plt = create_dual_plots(1, recall, f1, true_positive, total_funcs,
-#                            ['Precision', 'Recall', 'F1'],
-#                            ['Found','Not Found'])
-#
-#    plt.savefig("dual_plot")
-#    return 
-
 def create_dual_plots(bar_value1, bar_value2, bar_value3, pie_found, pie_total, labels_bar, labels_pie):
     # Create a figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
@@ -1136,143 +1005,6 @@ def ghidra_funcs(
         print(f"Results for {f_path.name} cached")
     return
 
-
-
-@app.command()
-def read_summary(
-    opt_lvl: Annotated[str, typer.Argument()],
-    show_diff: Annotated[bool, typer.Option()]=False,
-    ):
-
-    log_path = Path(f"GHIDRA_RUN_{opt_lvl}.json")
-    if not log_path.exists():
-        print(f"No file {log_path}")
-        return
-
-    # Init the data dict
-    data = {}
-
-    # Read json data 
-    with open(log_path,'r') as f:
-        data = json.load(f)
-
-    # Totals 
-    false_positive = 0
-    false_negative= 0
-    true_positive = 0
-    concat_false_pos = []
-    concat_false_neg = []
-
-    for _, bin_data in data.items():
-        # Unqiue functions in non-strip: Missed funcs 
-        #                           -or- False Negative
-        # Unqiue funciotns in strip: False Positive
-
-        # Non-unique functions in strip: True Positive
-
-        false_positive += len(bin_data['false_pos'])
-        false_negative += len(bin_data['false_neg'])
-        true_positive += len(bin_data['true_pos'])
-
-        if show_diff:
-            concat_false_neg.extend(bin_data['false_neg'])
-            concat_false_pos.extend(bin_data['false_pos'])
-
-    total_funcs = true_positive + false_negative
-
-    # Recall 
-    recall = true_positive / (true_positive + false_negative)
-
-    # Precision 
-    precision = true_positive / (true_positive + false_positive)
-
-    # F1
-    f1 = 2 * precision * recall / (precision+recall)
-
-    if show_diff:
-        for name_addr in concat_false_pos:
-            print(f"{name_addr[0]:>4} | {name_addr[1]}: False pos")
-        for name_addr in concat_false_neg:
-            print(f"{name_addr[0]:>4} | {name_addr[1]}: False neg")
-
-    print("Stats:")
-    print("==================")
-    print(f"Number of functions: {total_funcs}")
-    print(f"Funcs correctly identified: {true_positive}")
-    print(f"False neg: {false_negative}")
-    print(f"False pos: {false_positive}")
-    print(f"Number of files: {len(data.keys())}")
-    print(f"Precision {precision}")
-    print(f"Recall: {recall}")
-    print(f"F1: {f1}")
-
-
-
-    return
-
-
-@app.command()
-def read_log(
-    binary: Annotated[str, typer.Argument()],
-    show_unique: Annotated[bool, typer.Option()] = False,
-    show_tru_pos: Annotated[bool, typer.Option()] = False,
-    ):
-
-    f_path =  Path(f".ghidra_bench/{binary}.json")
-    if not f_path.exists():
-        print(f"No log for {binary}")
-        return
-
-    with open(f_path, 'r') as f:
-        res = json.load(f)
-    res = list(res.values())[0]
-
-    # False Negative - Functions in nonstrip that arent in strip
-    false_neg = res[0][1]
-
-    # False Positive
-    false_pos = res[1][1]
-
-    # True Positive
-    strip_total_func = res[1][0]
-    true_pos = [x for x in strip_total_func if x not in false_pos]
-
-
-    # Recall 
-    recall = len(true_pos) / (len(true_pos) + len(false_neg))
-
-    # Precision 
-    precision = len(true_pos) / (len(true_pos) + len(false_pos))
-
-    # F1
-    f1 = 2 * precision * recall / (precision+recall)
-
-    print(f"Total functions: {len(true_pos)+len(false_neg)}")
-    print(f"True Positive: {len(true_pos)}")
-    print(f"False Negative: {len(false_neg)}")
-    print(f"False Positive: {len(false_pos)}")
-    print(f"Precision: {precision}")
-    print(f"Recall: {recall}")
-    print(f"F1: {f1}")
-
-    if show_tru_pos:
-        print(f"Displaying the True Positive addrs")
-        for name_addr in true_pos:
-            print(f"{name_addr}")
-
-    if show_unique:
-        print(f"FALSE NEGATIVE ==================================")
-        for name_addr in false_neg:
-            name = name_addr[0]
-            addr = name_addr[1]
-            print(f"{addr:<4} | {name}")
-        print(f"FALSE POSITIVE ==================================")
-        for name_addr in false_pos:
-            name = name_addr[0]
-            addr = name_addr[1]
-            print(f"{addr:<4} | {name}")
-    return
-
 @app.command()
 def count_lief(
     binary: Annotated[str, typer.Argument()],
@@ -1329,7 +1061,9 @@ def count_inbetween(
 
     return
     
-@app.command()
+# TODO: rewrite this to follow the standard in cli_test 
+#       and batch_test_ghidra
+#@app.command()
 def bench_single(
         bin_file: Annotated[str, typer.Argument()],
         no_analysis: Annotated[bool, typer.Argument()]):
@@ -1366,7 +1100,8 @@ def bench_single(
     return
 
 
-@app.command()
+#@app.command()
+# TODO: Rewrite to follow the standard set in cli_test
 def bench(
     opt_lvl: Annotated[str, typer.Argument()],
     output_dir: Annotated[str, typer.Option()] = "ghidra_bench_results/",
@@ -1527,7 +1262,9 @@ def bench(
         print(f"f1: {f1}")
     return 
 
-@app.command()
+# TODO: New implementation of this that uses the standard 
+#       set in cli_test and batch_test_
+#@app.command()
 def timed_bench_all(
     output_dir: Annotated[str, typer.Option()] = ".NEW_timed_ghidra_bench/",
     cache_analysis_info: Annotated[bool,typer.Option()] = True,
@@ -1769,139 +1506,6 @@ def timed_bench_all(
             print(f"Recall: {recall}")
             print(f"f1: {f1}")
     return 
-
-@app.command()
-def read_timed_summary(
-    file: Annotated[str, typer.Argument()],
-    #opt_lvl: Annotated[str, typer.Argument()],
-    show_diff: Annotated[bool, typer.Option()]=False,
-    # TODO: Ability to provide a list of binary names 
-    #       that I want the summary of 
-    #       so that I can provide the exact lis tthat the 
-    #       rnn was tested on 
-    binary_name_file: Annotated[str, 
-                typer.Option(help='test file with bin names to include')] = '',
-    ):
-
-
-    binary_names = []
-    if binary_name_file != '':
-        bin_name_file = Path(binary_name_file)
-        if not bin_name_file.exists():
-            print(f"Binary name file {binary_name_file} does not exist")
-            return
-        with open(bin_name_file, 'r') as f:
-            for line in f.readlines():
-                binary_names.append(line.strip())
-
-        print(f"Loaded {len(binary_names)} from bin file")
-
-    log_path = Path(file)
-    if not log_path.exists():
-        print(f"No file {log_path}")
-        return
-
-
-    # Read json data 
-    with open(log_path,'r') as f:
-        data = json.load(f)
-
-    # Totals 
-    stripped_time = 0
-    nonstripped_time = 0
-    false_positive = 0
-    false_negative= 0
-    true_positive = 0
-    concat_false_pos = []
-    concat_false_neg = []
-    noa_stripped_time = 0
-    noa_nonstripped_time = 0
-    noa_false_positive = 0
-    noa_false_negative= 0
-    noa_true_positive = 0
-    total_files = 0
-
-
-
-    for _, bin_data in data.items():
-        if binary_names != []:
-            if bin_data['name'] not in binary_names:
-                continue
-
-        total_files += 1
-        # Unqiue functions in non-strip: Missed funcs 
-        #                           -or- False Negative
-        # Unqiue funciotns in strip: False Positive
-
-        # Non-unique functions in strip: True Positive
-        stripped_time += bin_data['stripped_wall_time']
-        nonstripped_time += bin_data['nonstripped_wall_time']
-
-        false_positive += len(bin_data['false_pos'])
-        false_negative += len(bin_data['false_neg'])
-        true_positive += len(bin_data['true_pos'])
-
-        noa_stripped_time += bin_data['noanalysis_stripped_wall_time']
-        noa_nonstripped_time += bin_data['noanalysis_nonstripped_wall_time']
-
-        noa_false_positive += len(bin_data['noanalysis_false_pos'])
-        noa_false_negative += len(bin_data['noanalysis_false_neg'])
-        noa_true_positive +=  len(bin_data['noanalysis_true_pos'])
-        if show_diff:
-            concat_false_neg.extend(bin_data['false_neg'])
-            concat_false_pos.extend(bin_data['false_pos'])
-
-    total_funcs = true_positive + false_negative
-
-    # metrics
-    recall = true_positive / (true_positive + false_negative)
-    precision = true_positive / (true_positive + false_positive)
-    f1 = 2 * precision * recall / (precision+recall)
-
-    noa_total_funcs = noa_true_positive + noa_false_negative
-
-    # metrics
-    noa_recall = noa_true_positive / (noa_true_positive + noa_false_negative)
-    noa_precision = noa_true_positive / (noa_true_positive + noa_false_positive)
-    noa_f1 = 2 * noa_precision * noa_recall / (noa_precision+noa_recall)
-
-
-
-    if show_diff:
-        for name_addr in concat_false_pos:
-            print(f"{name_addr[0]:>4} | {name_addr[1]}: False pos")
-        for name_addr in concat_false_neg:
-            print(f"{name_addr[0]:>4} | {name_addr[1]}: False neg")
-
-    print("Stats:")
-    print("==================")
-    print("With analysis:")
-    print("--------------")
-    print(f"| TP: {true_positive}")
-    print(f"| FN: {false_negative}")
-    print(f"| FP: {false_positive}")
-    print(f"| Number of files: {total_files}")
-    print(f"| Precision {precision}")
-    print(f"| Recall: {recall}")
-    print(f"| F1: {f1}")
-    print(f"| Time, nonstripped: {nonstripped_time}")
-    print(f"| Time, stripped: {stripped_time}")
-    print("Without analysis:")
-    print("---0-------------")
-    print(f"TP: {noa_true_positive}")
-    print(f"FN: {noa_false_negative}")
-    print(f"FP: {noa_false_positive}")
-    print(f"Number of files: {total_files}")
-    print(f"Precision {noa_precision}")
-    print(f"Recall: {noa_recall}")
-    print(f"F1: {noa_f1}")
-    print(f"Time, nonstripped: {noa_nonstripped_time}")
-    print(f"Time, stripped: {noa_stripped_time}")
-    return
-
-
-
-
 
 
 if __name__ == "__main__":
