@@ -3,6 +3,9 @@
     that window of bytes as a function start or not
 '''
 import lief
+import shutil
+import subprocess
+import os
 import json
 import time
 from lightning.pytorch.cli import LightningCLI
@@ -700,11 +703,6 @@ def rnn_predict(model, unstripped_bin):
     # the rnn can predict chunks of 1000 bytes 
 
     threshold = .9
-    metrics = [
-        BinaryF1Score(threshold=threshold),
-        BinaryPrecision(threshold=threshold),
-        BinaryRecall(threshold=threshold),
-    ]
 
     tp = 0
     tn = 0
@@ -714,30 +712,27 @@ def rnn_predict(model, unstripped_bin):
     data_gen = generate_minimal_labeled_features(unstripped_bin)
     inp_chunk = []
     lbl_chunk = []
+
+    # Recored start time
+    start = time.time()
+
     for row in data_gen:
-        # Each row is 
-        #yield np.array([func_start, func_middle, func_end, *byte], dtype=np.bool_)
-
-        # convert the numpy list to row 
-        row_l = list(row)
-
-        lbl_chunk.append(row_l[0])
-        inp_chunk.append(row_l[3:])
+        # Index | meaning
+        # 0     | is_start
+        # 1     | is_middle
+        # 2     | is_end 
+        # 3:    | one_hot_encoded value
+        lbl_chunk.append(row[0])
+        inp_chunk.append(row[3:])
+        
+        # NOTICE: Feed the model with 1000 bytes
 
         if len(lbl_chunk) == 1000:
             # make numpy matrix for this chunk
-            #lbl = np.array(np.array(lbl_chunk))
             lbl = np.array(np.array(lbl_chunk))
-            #inp = np.array(np.array(inp_chunk))
             inp = np.array([inp_chunk])
 
-            # The label is the first byte 
-            #   1 = start 
-            #   0 = end
-
-            # The input is the matrix of all the columns after the first 3
-            # columns 
-            # and all the rows
+            # Get the prediction from the model 
             with torch.no_grad():
                 prediction = model(torch.Tensor(inp).to(DEVICE))
 
@@ -746,18 +741,37 @@ def rnn_predict(model, unstripped_bin):
             inp_chunk = []
 
             # Score the prediction
-
             prediction = prediction.squeeze().to('cpu').numpy()
             prediction[prediction >= 0.9] = 1
             prediction[prediction < 0.9] = 0
             target = lbl.squeeze()
 
-            tp += np.sum((prediction == 1) & (target == 1))
-            tn += np.sum((prediction == 0) & (target == 0))
-            fp += np.sum((prediction == 1) & (target == 0))
-            fn += np.sum((prediction == 0) & (target == 1))
+            # Some each of the cases. The .item() changed the type from
+            # np.int64 to int
+            tp += np.sum((prediction == 1) & (target == 1)).item()
+            tn += np.sum((prediction == 0) & (target == 0)).item()
+            fp += np.sum((prediction == 1) & (target == 0)).item()
+            fn += np.sum((prediction == 0) & (target == 1)).item()
 
-    return tp, tn, fp, fn 
+    runtime = time.time() - start
+
+    return tp, tn, fp, fn, runtime 
+
+@app.command()
+def train_on(
+        inp_dir: Annotated[str, typer.Argument(
+                                    help='Directory of bings to train on')],
+    ):
+
+    # Get the files from the input path
+    train_files = list(Path(inp_dir).rglob('*')) 
+
+
+    # Train on these files
+    metrics, classifier = lit_model_train(train_files)
+    print([x.compute() for x in metrics])
+
+    return
 
 
 @app.command()
@@ -769,7 +783,12 @@ def train_on_first(
                         help='Num bins to test on')],
     ):
 
-    OPTIMIZATION = 'O2'
+    opts = ['O0','O1','O2','O3','Z','S']
+
+    # TODO: verify this is how Oz and Os are lbls
+    if opt_lvl not in opts:
+        print(f"opt lbl must be in {opts}")
+        return
 
     ##TODO: This is best used when I have large similar datasets for O0-Oz
     ##       until I have all of those compiled I will manually split
@@ -796,7 +815,7 @@ def train_on_first(
             continue
 
 
-        if info['optimization'].upper() in OPTIMIZATION:
+        if info['optimization'].upper() in opt_lvl.upper():
 
             bin_file  =  parent / info['binary_name']
             if bin_file.exists():
@@ -809,6 +828,10 @@ def train_on_first(
 
     # Get the first x files
     first_x_files = rust_files[0:num_bins]
+
+    with open(f"TRAINED_FILESET_{opt_lvl}.txt", 'w') as f:
+        f.write("\n".join(x.name for x in first_x_files))
+        
 
     # Train on these files
     metrics, classifier = lit_model_train(first_x_files)
@@ -835,9 +858,8 @@ def train_without(
     if not test_path.exists():
         print(f"PAth {test_path} does not exist")
 
+    # Get the test files 
     rust_test_files = [ x.name for x in test_path.glob('*')]
-
-    rust_train_files = []
 
     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
         info_file = parent / 'info.json'
@@ -862,14 +884,12 @@ def train_without(
             if info['binary_name'] not in rust_test_files:
                 rust_train_files.append(npz_file)
 
+    # Get the classifier and the metrics from training 
     metrics, classifier = lit_model_train(rust_train_files)
     print([x.compute() for x in metrics])
 
-
-    # Create the dataloader for the test files now 
-    train_data, train_lbl= gen_one_hot_dataset(rust_train_files ,
-                                            num_chunks=1000)
-
+    # Create the pytorch tainer, will call the .test method on this 
+    # object to test the model 
     trainer = pylight.Trainer(max_epochs=100)
 
     classifier.reset_metrics()
@@ -879,38 +899,114 @@ def train_without(
     res = trainer.test(classifier,dataloaders=test_dataloader)
     runtime = time.time() - start
 
-    print(f"Test on {len(rust_test_files)}")
-    metrics = [x.compute() for x in classifier.metrics]
-    print(metrics)
-    print(f"Run time for 1000 chunks on optimization {OPTIMIZATION}: {runtime}")
-    print(f"The len of train files was {len(rust_train_files)}")
-    print(f"The len of test files was {len(rust_test_files)}")
+    # TODO: This is old code but I want to make sure its completely 
+    #        useless before I delete it 
+    #print(f"Test on {len(rust_test_files)}")
+    #metrics = [x.compute() for x in classifier.metrics]
+    #print(metrics)
+    #print(f"Run time for 1000 chunks on optimization {opt_lvl}: {runtime}")
+    #print(f"The len of train files was {len(rust_train_files)}")
+    #print(f"The len of test files was {len(rust_test_files)}")
+    return
+
+@app.command()
+def read_results(
+        file: Annotated[str, typer.Argument(
+                        help='json file of results')],
+    ):
+
+    # Create a path object for the file
+    file_path = Path(file)
+
+    # If the file doesn't exist return error
+    if not file_path.exists():
+        print(f"File {file} does not exist")
+        return
+
+    # Load the json file
+    with open(file, 'r') as f:
+        data = json.load(f)
+        # Data is made of 
+        #{
+        #    '<bin_name>' : {'tp' : ,
+        #                     'fp' : ,
+        #                     'tn' : ,
+        #                     'fn' : ,
+        #                    }
+        #}
+
+    # Sum all the confusion matrix values 
+    tp = sum(x['tp'] for x in data.values())
+    fp = sum(x['fp'] for x in data.values())
+    tn = sum(x['tn'] for x in data.values())
+    fn = sum(x['fn'] for x in data.values())
+    runtime = sum(x['runtime'] for x in data.values())
+    tot_file_size = sum(x['filesize'] for x in data.values())
+
+    # Recall 
+    recall = tp/ (tp + fn)
+
+    # Precision 
+    precision = tp / (tp + fp)
+
+    # F1
+    f1 = 2 * precision * recall / (precision+recall)
+
+    # File avg runtime
+    file_avg = runtime / len(data.values())
+
+    # Byte per second 
+    # TODO: This bps is per .text byte ...
+    #       talking with boyand this should change
+    bps = (tp+tn+fn+fp) / runtime
+
+    print(f"For {len(data.keys())} bins...")
+    print(f"TP : {tp}")
+    print(f"TN : {tn}")
+    print(f"FP : {fp}")
+    print(f"FN : {fn}")
+    print(f"F1 : {f1}")
+    print(f"Precision : {precision}")
+    print(f"Recall : {recall}")
+    print(f"Avg file time: {file_avg}")
+    print(f"BPS .text: {bps}")
+    print(f"BPS whole file: {tot_file_size/runtime}")
+    print(f"total file size: {tot_file_size}")
 
 
     return
+
+
+def strip_file(bin_path:Path)->Path:
+
+    # Copy the bin and strip it 
+    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
+    strip_bin = strip_bin.resolve()
+    shutil.copy(bin_path, Path(strip_bin))
+    print(f"The new bin is at {strip_bin}")
+
+    try:
+        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
+    except subprocess.CalledProcessError as e:
+        print("Error running command:", e)
+        # TODO: Handle better
+        raise Exception("Could not strip bin")
+
+    return strip_bin 
 
 @app.command()
 def test_on(
         testset_dir: Annotated[str, typer.Argument(
                         help='Directory of bins to test on')],
         weights: Annotated[str, typer.Argument(
-                    help='File of bins')]):
+                    help='File of bins')],
+        results: Annotated[str, typer.Argument(
+                    help="Path to save results to")]):
 
     # Make sure checkpoint exists
     if not Path(weights).exists():
         print(f"Path {weights} doesn't exist")
         return
-
-    #learning_rate = 0.00005
-
-    #input_size=255
-    #hidden_size=16
-    #layers=1
-
-    #TODO: Load the model and give it hyper params
-
-    # Binary cross entrophy loss
-    #loss_func = nn.BCELoss()
 
     # Load the pytorch lightning model from the checkpoints
     lit_pylit = lit.load_from_checkpoint(weights)#,loss_func=loss_func,
@@ -932,14 +1028,45 @@ def test_on(
     tn = 0
     fp = 0
     fn = 0
+    log_file = Path(results)
     for file in alive_it(testfiles):
-        cur_tp, cur_tn, cur_fp, cur_fn = rnn_predict(model, file)
+        cur_tp, cur_tn, cur_fp, cur_fn, runtime = rnn_predict(model, file)
         tp+=cur_tp
         tn+=cur_tn
         fp+=cur_fp
         fn+=cur_fn
         print(f"tp {tp} | tn {tn} | fp {fp} | fn {fn}")
 
+        # Get the total file size
+        stripped_file = strip_file(file)
+        file_size = os.path.getsize(stripped_file)
+        stripped_file.unlink()
+
+
+        # Read the log file
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                cur_data = json.load(f)
+        else:
+            cur_data = {}
+
+        # update the log file
+        cur_data[file.name] = {
+            'tp' : tp,
+            'tn' : tn,
+            'fp' : fp,
+            'fn' : fn,
+            'runtime' : runtime,
+            'filesize': file_size
+        }
+
+        # Update the log
+        if log_file.exists():
+            log_file.unlink()
+
+        # Dump the new log file
+        with open(log_file, 'w') as f:
+            json.dump(cur_data, f)
 
     return
 
