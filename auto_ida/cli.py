@@ -4,6 +4,7 @@ from typing_extensions import Annotated
 import rich 
 from rich.console import Console
 from pathlib import Path
+from alive_progress import alive_it
 
 #from ripkit.cargo_picky import (
 #  is_executable,
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 from typing import List 
 import numpy as np
 import lief
+import time
 
 
 console = Console()
@@ -110,8 +112,9 @@ def read_raw_log(rawlog: Path):
 def ida_on(binary: Annotated[str, typer.Argument(help="bin to run on")], 
            logfile: Annotated[str, typer.Argument(help="bin to run on")],
            resfile: Annotated[str, typer.Argument(help="name of result file")]):
-
-
+    '''
+    Report the IDA detected funtions to the resfile
+    '''
 
     # Generate the ida command 
     cmd, clear_cmd = make_ida_cmd(Path(binary), Path(logfile))
@@ -135,14 +138,18 @@ def ida_on(binary: Annotated[str, typer.Argument(help="bin to run on")],
 def get_ida_funcs(file: Path):
 
     # To get the functions, ida logs all the std to a log file 
-    ida_log_file = file.resolve().parent / f"{file.name}_IDA_LOG.log"
+    #ida_log_file = file.resolve().parent / f"{file.name}_IDA_LOG.log"
+    ida_log_file = Path(".") / f"{file.name}_IDA_LOG.log"
 
     # Get the commands to run ida and clear the extra files 
     cmd, clear_cmd = make_ida_cmd(file, ida_log_file)
 
+    start = time.now()
 
     # Run the command to run ida 
     res = subprocess.check_output(cmd,shell=True)
+
+    runtime = time.now() - time
 
     # Fet the functions from the log file 
     funcs = read_raw_log(ida_log_file)
@@ -153,7 +160,7 @@ def get_ida_funcs(file: Path):
     # Remove the database file 
     res = subprocess.check_output(clear_cmd, shell=True)
 
-    return funcs
+    return funcs, runtime
 
 @app.command()
 def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
@@ -163,10 +170,26 @@ def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with 
     Batch run ida on bins
     '''
 
-    # For each file get the functions from IDA 
-    for file in Path(inp_dir).rglob('*'):
-        funcs = get_ida_funcs(file)
+    if not Path(out_dir).exists():
+        print(f"{out_dir} does nto exist")
+        return
 
+    # For each file get the functions from IDA 
+    for file in alive_it(Path(inp_dir).rglob('*')):
+
+        # Ge the ida funcs
+        funcs, runtime = get_ida_funcs(file)
+
+        # The result file a a path obj
+        resfile = Path(out_dir) / f"{file.name}_RESULT"
+        time_file = Path(resfile.name + '_runtime')
+
+        # Save the funcs to the out file
+        with open(Path(resfile), 'w') as f:
+            for func in funcs:
+                f.write(f"{func[0].strip()}, {func[1].strip()}\n")
+        with open(time_file, 'w') as f:
+            f.write(f"{runtime}")
 
     return 
 
