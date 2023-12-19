@@ -1,5 +1,6 @@
 import typer
 import shutil
+from dataclasses import dataclass
 from itertools import chain
 import lief
 import math
@@ -545,6 +546,12 @@ def analyze(bin_path: Annotated[str, typer.Argument()],
                     overwrite_existing=False)
     print("Done!")
 
+@dataclass
+class arch_stats():
+    files: int
+    size: int
+    opt: str
+    arch: str
 
 @app.command()
 def stats():
@@ -552,6 +559,7 @@ def stats():
     Print stats about the rippe binaries
     '''
 
+    # Dict of info
     stats = { }
 
     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
@@ -573,29 +581,37 @@ def stats():
         if info['target'] not in stats.keys():
             stats[info['target']] = [0 for _ in range(6)]
 
+        bin_files = parent / info['name']
 
-        if '0' in info['optimization']:
-            stats[info['target']][0]+=1
-        if '1' in info['optimization']:
-            stats[info['target']][1]+=1
-        if '2' in info['optimization']:
-            stats[info['target']][2]+=1
-        if '3' in info['optimization']:
-            stats[info['target']][3]+=1
-        if 'z' in info['optimization']:
-            stats[info['target']][4]+=1
-        if 's' in info['optimization']:
-            stats[info['target']][5]+=1
+        dict_key = (info['target'], info['optimization'])
 
-    for key, counters in stats.items():
-        print(f"{key}")
-        for i, count in enumerate(counters):
-            if i <=3:
-                print(f"{i} was {count}")
-            elif i ==4 :
-                print(f"z was {count}")
-            elif i ==5 :
-                print(f"s was {count}")
+        stats[dict_key].files += 1
+        stats[dict_key].size += bin_files.stat().st_size
+
+        #if '0' in info['optimization']:
+        #    stats[info['target']][0]+=1
+        #if '1' in info['optimization']:
+        #    stats[info['target']][1]+=1
+        #if '2' in info['optimization']:
+        #    stats[info['target']][2]+=1
+        #if '3' in info['optimization']:
+        #    stats[info['target']][3]+=1
+        #if 'z' in info['optimization']:
+        #    stats[info['target']][4]+=1
+        #if 's' in info['optimization']:
+        #    stats[info['target']][5]+=1
+
+    for (arch, opt), data in stats.items():
+        print(f"{arch} | {opt}")
+        print(f"    {data.files} files")
+        print(f"    {data.size} files")
+        #for i, count in enumerate(counters):
+        #    if i <=3:
+        #        print(f"{i} was {count}")
+        #    elif i ==4 :
+        #        print(f"z was {count}")
+        #    elif i ==5 :
+        #        print(f"s was {count}")
 
     return
 
@@ -878,7 +894,7 @@ def export_dataset(
 
 @app.command()
 def count_funcs(
-    inp_dir: Annotated[str, typer.Argument()],
+    inp_dir: Annotated[str, typer.Argument(help="Directory containing files")],
     ignore_funcs: Annotated[bool, typer.Argument()],
     #backend: Annotated[str, typer.Argument(help="lief, ghidra, or ida")],
     ):
