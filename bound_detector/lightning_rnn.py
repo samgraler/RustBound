@@ -1070,6 +1070,30 @@ def test_on(
 
     return
 
+@app.command()
+def model_summary():
+
+    learning_rate =  0.0005
+    input_size=255
+    hidden_size=16
+    layers=1
+
+    model = recreatedModel(input_size, hidden_size, layers)
+
+    # Binary cross entrophy loss
+    loss_func = nn.BCELoss()
+
+    classifier = lit(model,
+                     loss_func=loss_func,
+                     learning_rate=learning_rate,
+                     input_size=input_size,
+                     hidden_size=hidden_size,
+                     num_layers=layers)
+
+    summary(model, (32,1000,255))
+
+    return
+
 
 if __name__ == "__main__":
     app()

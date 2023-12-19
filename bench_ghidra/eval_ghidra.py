@@ -775,53 +775,6 @@ def func_addrs_timed_bench(
     funcs = parse_for_functions(res.stdout)
 
     return list(funcs.addresses), runtime
-
-def smol_ghid_bench(
-     bin_path: Path, 
-    post_script: Path = Path("~/ghidra_scripts/List_Function_and_Entry.py").expanduser(),
-    script_path: Path = Path("~/ghidra_scripts/").expanduser(),
-    analyzer: Path = 
-    Path("~/ghidra_10.3.3_PUBLIC/support/analyzeHeadless").expanduser().resolve(),
-    no_analysis=False,
-    strip_file=False):
-
-    # Generate ground turth
-    ground_truth = parse_ground_truth(bin_path)
-    gnd_addrs = [x[0] for x in ground_truth]
-
-    #TODO: Every test should be on stripped file
-    if strip_file:
-        strip_bin_path = gen_strip_file(bin_path)
-
-        # Run the timed bench mark
-        funcs, runtime = func_addrs_timed_bench(strip_bin_path, 
-                                    post_script, script_path, 
-                                    analyzer,
-                                    no_analysis=no_analysis)
-
-        strip_bin_path.unlink()
-    else: 
-        # Run the timed bench mark
-        funcs, runtime = func_addrs_timed_bench(bin_path, post_script,
-                                    script_path, analyzer,
-                                    no_analysis=no_analysis)
-
-        # Find the offset for the ghidra addrs and apply it
-        offset =  find_ghidra_offset(ground_truth, funcs)
-
-        funcs = [x-offset for x in funcs
-                if x-offset > min(gnd_addrs) and 
-                    x-offset < max(gnd_addrs)]
-
-    # Consturct the ghidra result object
-    res = GhidraBenchResult(strip_file, no_analysis, 
-                bin_path.name, gnd_addrs, funcs,
-                            runtime)
-
-
-    return  res
-
-
    
 
 def NEW_ghidra_bench_functions(
@@ -832,11 +785,6 @@ def NEW_ghidra_bench_functions(
     verbose=False,
     no_analysis=False):
 
-
-    #TODO: : Use smol_ghid_bech 
-    # save every result of smol ghid bench
-    # smol_ghid_bench(bin_path, strip=True, no_analyiss=False
-    # smol_ghid_bench(bin_path, strip=True, no_analyiss=True
 
     # Load ground truth 
     ground_truth = parse_ground_truth(bin_path)
