@@ -241,6 +241,7 @@ def list_functions(
 
     path = Path(binary)
     functions = get_functions(path)
+
     func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
 
     # Fancy line to get the longest addr and round it up to 2 bytes 
@@ -872,6 +873,48 @@ def export_dataset(
         for bin in track(bins, description=f"Copying {len(final_binset)}..."):
             dest_file = out_dir / bin.name
             shutil.copy(bin.resolve(),dest_file.resolve())
+
+    return
+
+@app.command()
+def count_funcs(
+    inp_dir: Annotated[str, typer.Argument()],
+    ignore_funcs: Annotated[bool, typer.Argument()],
+    #backend: Annotated[str, typer.Argument(help="lief, ghidra, or ida")],
+    ):
+    '''
+    Count the functions in the .text section. Files must be non-stripped
+    '''
+
+    num_funcs = {}
+    f_size = {}
+    for path in Path(inp_dir).glob('*'):
+
+        f_size[path] = path.stat().st_size
+        if ignore_funcs:
+            continue
+
+        functions = get_functions(path)
+        parsed_bin = lief.parse(str(path.resolve()))
+
+        # Get the text session
+        text_section = parsed_bin.get_section(".text")
+
+        # Get the bytes in the .text section
+        text_bytes = text_section.content
+
+        # Get the base address of the loaded binary
+        base_address = parsed_bin.imagebase
+
+        func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
+                            if x.addr > base_address + text_section.virtual_address and 
+                            x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+
+        num_funcs[path] = len(func_start_addrs.keys())
+
+    if not ignore_funcs: print(f"Total funcs: {sum(num_funcs.values())}")
+    print(f"Total files: {len(num_funcs.keys())}")
+    print(f"Total file size: {sum(f_size.values())}")
 
     return
 
