@@ -550,8 +550,29 @@ def analyze(bin_path: Annotated[str, typer.Argument()],
 class arch_stats():
     files: int
     size: int
-    opt: str
-    arch: str
+    funcs: int
+
+
+def num_funcs(path:Path):
+
+   functions = get_functions(path)
+   parsed_bin = lief.parse(str(path.resolve()))
+
+   # Get the text session
+   text_section = parsed_bin.get_section(".text")
+
+   # Get the bytes in the .text section
+   text_bytes = text_section.content
+
+   # Get the base address of the loaded binary
+   base_address = parsed_bin.imagebase
+
+   func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
+                       if x.addr > base_address + text_section.virtual_address and 
+                       x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+
+   return len(func_start_addrs.keys())
+
 
 @app.command()
 def stats():
@@ -562,7 +583,7 @@ def stats():
     # Dict of info
     stats = { }
 
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in alive_it(Path("/home/ryan/.ripbin/ripped_bins/").iterdir()):
         info_file = parent / 'info.json'
         info = {}
         try:
@@ -578,41 +599,24 @@ def stats():
             print(f"An error occurred: {e}")
             continue
 
-        if info['target'] not in stats.keys():
-            stats[info['target']] = [0 for _ in range(6)]
-
-        bin_files = parent / info['name']
+        bin_file = parent / info['binary_name']
 
         dict_key = (info['target'], info['optimization'])
 
-        stats[dict_key].files += 1
-        stats[dict_key].size += bin_files.stat().st_size
+        if dict_key not in stats.keys():
+            stats[dict_key] = arch_stats(0,0,0)
 
-        #if '0' in info['optimization']:
-        #    stats[info['target']][0]+=1
-        #if '1' in info['optimization']:
-        #    stats[info['target']][1]+=1
-        #if '2' in info['optimization']:
-        #    stats[info['target']][2]+=1
-        #if '3' in info['optimization']:
-        #    stats[info['target']][3]+=1
-        #if 'z' in info['optimization']:
-        #    stats[info['target']][4]+=1
-        #if 's' in info['optimization']:
-        #    stats[info['target']][5]+=1
+        stats[dict_key].files += 1
+        stats[dict_key].size += bin_file.stat().st_size
+        stats[dict_key].funcs += num_funcs(bin_file)
 
     for (arch, opt), data in stats.items():
-        print(f"{arch} | {opt}")
+        if arch != "":
+            print(f"{arch} | {opt}")
+        else:
+            print(f"Unkown | {opt}")
         print(f"    {data.files} files")
-        print(f"    {data.size} files")
-        #for i, count in enumerate(counters):
-        #    if i <=3:
-        #        print(f"{i} was {count}")
-        #    elif i ==4 :
-        #        print(f"z was {count}")
-        #    elif i ==5 :
-        #        print(f"s was {count}")
-
+        print(f"    {data.size} bytes")
     return
 
 @app.command()
