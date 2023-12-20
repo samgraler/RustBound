@@ -144,12 +144,12 @@ def get_ida_funcs(file: Path):
     # Get the commands to run ida and clear the extra files 
     cmd, clear_cmd = make_ida_cmd(file, ida_log_file)
 
-    start = time.now()
+    start = time.time()
 
     # Run the command to run ida 
     res = subprocess.check_output(cmd,shell=True)
 
-    runtime = time.now() - time
+    runtime = time.time() - start
 
     # Fet the functions from the log file 
     funcs = read_raw_log(ida_log_file)
@@ -163,6 +163,19 @@ def get_ida_funcs(file: Path):
     return funcs, runtime
 
 @app.command()
+def count_funcs(
+    inp_file: Annotated[str, typer.Argument(help="Input file")], 
+    ):
+
+
+    funcs, runtime = get_ida_funcs(Path(inp_file))
+
+    print(f"{len(funcs)} functions")
+
+    return
+
+
+@app.command()
 def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
                out_dir: Annotated[str, typer.Argument(help="Directory to output logs")], 
                ):
@@ -174,6 +187,9 @@ def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with 
         print(f"{out_dir} does nto exist")
         return
 
+    time_dir = Path(out_dir).parent / f"{Path(out_dir).name}_TIME"
+    time_dir.mkdir()
+
     # For each file get the functions from IDA 
     for file in alive_it(Path(inp_dir).rglob('*')):
 
@@ -182,7 +198,7 @@ def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with 
 
         # The result file a a path obj
         resfile = Path(out_dir) / f"{file.name}_RESULT"
-        time_file = Path(resfile.name + '_runtime')
+        time_file = time_dir / f"{resfile.name}_runtime"
 
         # Save the funcs to the out file
         with open(Path(resfile), 'w') as f:
