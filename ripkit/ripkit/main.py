@@ -896,11 +896,11 @@ def export_dataset(
 
     return
 
+
 @app.command()
 def count_funcs(
     inp_dir: Annotated[str, typer.Argument(help="Directory containing files")],
-    ignore_funcs: Annotated[bool, typer.Argument()],
-    #backend: Annotated[str, typer.Argument(help="lief, ghidra, or ida")],
+    backend: Annotated[str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")]='lief',
     ):
     '''
     Count the functions in the .text section. Files must be non-stripped
@@ -908,31 +908,59 @@ def count_funcs(
 
     num_funcs = {}
     f_size = {}
+
+    # Check that the backend is good 
+    if backend not in ["lief", "ghidra", "ida", "objdump1", "objdump2", "readelf"]:
+        print(f"The backend is not in {backend}")
+        return
+
     for path in Path(inp_dir).glob('*'):
 
         f_size[path] = path.stat().st_size
-        if ignore_funcs:
-            continue
 
-        functions = get_functions(path)
-        parsed_bin = lief.parse(str(path.resolve()))
+        if backend == 'lief':
+            functions = get_functions(path)
+            parsed_bin = lief.parse(str(path.resolve()))
 
-        # Get the text session
-        text_section = parsed_bin.get_section(".text")
+            # Get the text session
+            text_section = parsed_bin.get_section(".text")
 
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
+            # Get the bytes in the .text section
+            text_bytes = text_section.content
 
-        # Get the base address of the loaded binary
-        base_address = parsed_bin.imagebase
+            # Get the base address of the loaded binary
+            base_address = parsed_bin.imagebase
 
-        func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
-                            if x.addr > base_address + text_section.virtual_address and 
-                            x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+            func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
+                                if x.addr > base_address + text_section.virtual_address and 
+                                x.addr < base_address + text_section.virtual_address + len(text_bytes) }
 
-        num_funcs[path] = len(func_start_addrs.keys())
+            num_funcs[path] = len(func_start_addrs.keys())
+        elif backend == 'ghidra':
+            #TODO
+            print('nop')
+        elif backend == 'ida':
+            #TODO
+            print('nop')
+        elif backend == 'objdump1':
+            #TODO
+            cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort | wc -l"
+            res = subprocess.check_output(cmd, shell=True)
+            print(res)
+        elif backend == 'objdump2':
+            #TODO
+            cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
+            res = subprocess.check_output(cmd, shell=True)
+            print(res)
+        elif backend == 'readelf':
+            #TODO
+            cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
+            res = subprocess.check_output(cmd, shell=True)
+            print(res)
 
-    if not ignore_funcs: print(f"Total funcs: {sum(num_funcs.values())}")
+
+
+    print(f"Total funcs: {sum(num_funcs.values())}")
     print(f"Total files: {len(num_funcs.keys())}")
     print(f"Total file size: {sum(f_size.values())}")
 
