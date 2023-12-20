@@ -2,6 +2,7 @@ import typer
 import shutil
 from dataclasses import dataclass
 from itertools import chain
+import subprocess
 import lief
 import math
 import json
@@ -899,7 +900,7 @@ def export_dataset(
 
 @app.command()
 def count_funcs(
-    inp_dir: Annotated[str, typer.Argument(help="Directory containing files")],
+    inp: Annotated[str, typer.Argument(help="Directory containing files -or- single file")],
     backend: Annotated[str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")]='lief',
     ):
     '''
@@ -908,13 +909,20 @@ def count_funcs(
 
     num_funcs = {}
     f_size = {}
+    lief_total = {}
 
     # Check that the backend is good 
     if backend not in ["lief", "ghidra", "ida", "objdump1", "objdump2", "readelf"]:
         print(f"The backend is not in {backend}")
         return
 
-    for path in Path(inp_dir).glob('*'):
+    if Path(inp).is_dir():
+        files = Path(inp).glob('*')
+    else:
+        files = [Path(inp)]
+
+
+    for path in alive_it(files):
 
         f_size[path] = path.stat().st_size
 
@@ -931,6 +939,7 @@ def count_funcs(
             # Get the base address of the loaded binary
             base_address = parsed_bin.imagebase
 
+            lief_total[path] = len(functions)
             func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
                                 if x.addr > base_address + text_section.virtual_address and 
                                 x.addr < base_address + text_section.virtual_address + len(text_bytes) }
@@ -959,6 +968,9 @@ def count_funcs(
             print(res)
 
 
+
+    if backend == 'lief':
+        print(f"lief Total funcs: {sum(lief_total.values())}")
 
     print(f"Total funcs: {sum(num_funcs.values())}")
     print(f"Total files: {len(num_funcs.keys())}")
