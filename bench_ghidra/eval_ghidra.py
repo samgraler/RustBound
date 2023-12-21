@@ -389,18 +389,17 @@ def read_comparison_dir(
             not_analyzed['fn'] += len(data['lief_only'])
             not_analyzed['runtime'] += data['runtime']
             not_analyzed['filesize'] += data['filesize']
-        # Count the total tp, fp, fn for each category:
-        # stripped, analyzed
-        # stripped, no_analysis
 
     print("ANALYZED:")
     for key in analyzed.keys():
         print(f"{key} : {analyzed[key]}")
 
     print(f"BPS: {analyzed['filesize'] / analyzed['runtime']}")
-    prec = analyzed['tp']/(analyzed['tp']+analyzed['fp'])
-    recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
-    f1 = 2 * prec* recall / (prec+recall)
+
+    if analyzed['tp'] > 0:
+        prec = analyzed['tp']/(analyzed['tp']+analyzed['fp'])
+        recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
+        f1 = 2 * prec* recall / (prec+recall)
 
     print(f"Prec: {prec}")
     print(f"Recall: {recall}")
@@ -436,6 +435,7 @@ def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:
         'ghid_only' : ghid_only.tolist(),
         'lief_only' : lief_only.tolist(),
         'runtime' : runtime,
+        'filesize' : bin.stat().st_size
     }
 
     # Dump the file to the json file
