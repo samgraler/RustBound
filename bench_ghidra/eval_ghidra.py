@@ -346,10 +346,12 @@ def read_comparison_dir(
     ):
 
 
-    keys = ['tp', 'fp', 'fn']
+    #keys = ['tp', 'fp', 'fn', 'runtime']
+    keys = ['tp', 'fp', 'fn', 'runtime', 'filesize']
 
     analyzed = { k: 0 for k in keys}
     not_analyzed = { k: 0 for k in keys}
+
 
     for file in alive_it(Path(dir).glob('*')):
         # IF STRIPPED in name it was stripped 
@@ -377,12 +379,16 @@ def read_comparison_dir(
             analyzed['tp'] += len(data['same'])
             analyzed['fp'] += len(data['ghid_only'])
             analyzed['fn'] += len(data['lief_only'])
+            analyzed['filesize'] += data['filesize']
+            analyzed['runtime'] += data['runtime']
 
 
         if stripped and not was_analyzed:
             not_analyzed['tp'] += len(data['same'])
             not_analyzed['fp'] += len(data['ghid_only'])
             not_analyzed['fn'] += len(data['lief_only'])
+            not_analyzed['runtime'] += data['runtime']
+            not_analyzed['filesize'] += data['filesize']
         # Count the total tp, fp, fn for each category:
         # stripped, analyzed
         # stripped, no_analysis
@@ -391,6 +397,7 @@ def read_comparison_dir(
     for key in analyzed.keys():
         print(f"{key} : {analyzed[key]}")
 
+    print(f"BPS: {analyzed['filesize'] / analyzed['runtime']}")
     prec = analyzed['tp']/(analyzed['tp']+analyzed['fp'])
     recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
     f1 = 2 * prec* recall / (prec+recall)
@@ -402,15 +409,16 @@ def read_comparison_dir(
 
     print("+=====================+")
     print("NOT ANALYZED:")
-    for key in analyzed.keys():
+    for key in not_analyzed.keys():
         print(f"{key} : {not_analyzed[key]}")
 
-    prec = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fp'])
-    recall = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fn'])
-    f1 = 2 * prec* recall / (prec+recall)
-    print(f"Prec: {prec}")
-    print(f"Recall: {recall}")
-    print(f"F1 : {f1}")
+    if not_analyzed['tp'] > 0:
+        prec = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fp'])
+        recall = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fn'])
+        f1 = 2 * prec* recall / (prec+recall)
+        print(f"Prec: {prec}")
+        print(f"Recall: {recall}")
+        print(f"F1 : {f1}")
 
     return
 
