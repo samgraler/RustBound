@@ -182,33 +182,6 @@ def get_all_bins()->dict:
     return bin_by_opt
 
 @app.command()
-def list_functions(
-        binary: Annotated[str, typer.Argument()],
-        count: Annotated[bool, typer.Option()] = False,
-    ):
-    '''
-    Print the list of function that lief detects
-    '''
-
-    path = Path(binary)
-    functions = get_functions(path)
-
-    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
-
-    # Fancy line to get the longest addr and round it up to 2 bytes 
-    max_len = math.ceil(max(len(str(x)) for x in func_start_addrs.keys()) / 2) * 2
-
-    for addr, info in func_start_addrs.items():
-        #print(f"0x{str(int(hex(addr),16)).zfill(max_len)}: {info[0]}")
-        #print(f"{str(hex(addr)).zfill(max_len)}: {info[0]}")
-        print(f"{hex(addr)}: {info[0]}")
-    if count:
-        print(f"{len(func_start_addrs.keys())} functions")
-
-    return
-    
-
-@app.command()
 def init():
     '''
     Initialize ripkit with rust data base,
