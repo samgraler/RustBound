@@ -128,7 +128,7 @@ def call_ghidra(
                                 universal_newlines=True)
 
         # Get the runtime 
-        runtime = start - time.time()
+        runtime = time.time() - start
 
         return output, runtime
     except subprocess.CalledProcessError as e:
