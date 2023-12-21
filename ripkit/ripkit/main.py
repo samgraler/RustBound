@@ -917,11 +917,12 @@ def count_funcs(
         return
 
     if Path(inp).is_dir():
-        files = Path(inp).glob('*')
+        files = list(Path(inp).glob('*'))
     else:
         files = [Path(inp)]
 
 
+    total_funcs = 0 
     for path in alive_it(files):
 
         f_size[path] = path.stat().st_size
@@ -955,12 +956,12 @@ def count_funcs(
             #TODO
             cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort | wc -l"
             res = subprocess.check_output(cmd, shell=True)
-            print(res)
+            total_funcs += int(res)
         elif backend == 'objdump2':
             #TODO
             cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
             res = subprocess.check_output(cmd, shell=True)
-            print(res)
+            total_funcs += int(res)
         elif backend == 'readelf':
             #TODO
             cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
@@ -971,10 +972,11 @@ def count_funcs(
 
     if backend == 'lief':
         print(f"lief Total funcs: {sum(lief_total.values())}")
-
-    print(f"Total funcs: {sum(num_funcs.values())}")
-    print(f"Total files: {len(num_funcs.keys())}")
-    print(f"Total file size: {sum(f_size.values())}")
+        print(f"Total funcs: {sum(num_funcs.values())}")
+        print(f"Total file size: {sum(f_size.values())}")
+    else:
+        print(f"Total functions: {total_funcs}")
+        print(f"Total files: {len(files)}")
 
     return
 
