@@ -766,11 +766,9 @@ def train_on(
     # Get the files from the input path
     train_files = list(Path(inp_dir).rglob('*')) 
 
-
     # Train on these files
     metrics, classifier = lit_model_train(train_files)
     print([x.compute() for x in metrics])
-
     return
 
 

@@ -1,2 +1,6 @@
 *.pyc
 .*
+*.ipynb
+exported_datasets
+helper_scripts
+saved_results
