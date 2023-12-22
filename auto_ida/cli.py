@@ -176,7 +176,8 @@ def count_funcs(
 
 
 @app.command()
-def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
+def batch_get_funcs(
+               inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
                out_dir: Annotated[str, typer.Argument(help="Directory to output logs")], 
                ):
     '''
@@ -208,6 +209,72 @@ def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with 
             f.write(f"{runtime}")
 
     return 
+
+
+def read_res(inp:Path, bin, debug=False):
+
+    lief_funcs = get_functions(bin)
+    gnd = {x.addr : (x.name, x.size) for x in lief_funcs}
+    gnd_start = np.array([int(x) for x in gnd.keys()])
+
+    res = []
+    # Read the result 
+    with open(inp, 'r') as f:
+        for line in f.readlines():
+            line = line.strip().split(',')[0].strip()
+            res.append(int(line,16))
+
+
+    if debug: 
+        with open('IDA_FUNC', 'w') as f:
+            for addr in res:
+                f.write(f'{addr}\n')
+        with open('LIEF_FUNC', 'w') as f:
+            gnd_start.sort()
+            for addr in gnd_start:
+                f.write(f'{addr}\n')
+
+    same = np.intersect1d(gnd_start, res)
+    lief_only = np.setdiff1d( gnd_start, res)
+    ida_only = np.setdiff1d( res, gnd_start )
+
+
+    return same, lief_only, ida_only
+
+
+@app.command()
+def read_results(
+        inp_dir: Annotated[str, typer.Argument(help="Directory with results")],
+        bin_dir: Annotated[str, typer.Argument(help="Directory with bins")],
+    ):
+
+    files = Path(inp_dir).glob('*')
+    bins = Path(bin_dir).glob('*')
+
+    #src = zip(files,bins)
+    src = []
+    for file in files:
+        bin = Path(f"{bin_dir}/{file.name.replace('_RESULT','')}")
+        src .append((file,bin))
+
+    tot_same = 0
+    tot_lief_only = 0
+    tot_ida_only = 0
+    debug=True
+    for (file,bin) in alive_it(src):
+        same, lief_o, ida_o = read_res(file,bin,debug)
+        debug=False
+
+        tot_same += len(same)
+        tot_lief_only += len(lief_o)
+        tot_ida_only += len(ida_o)
+
+
+    print(f"Same: {tot_same}")
+    print(f"Lief only: {tot_lief_only}")
+    print(f"IDA only: {tot_ida_only}")
+
+    return
 
 
 

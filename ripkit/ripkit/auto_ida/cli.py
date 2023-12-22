@@ -72,6 +72,7 @@ def get_lief_functions(bin_path: Path):
 
 def make_ida_cmd(binary: Path, logfile: Path):
 
+
     func_list = Path("function_list.py").resolve()
 
     ida = Path("~/idapro-8.3/idat64").expanduser()
