@@ -1,5 +1,6 @@
 import typer
 import bench_ghidra.eval_ghidra as ghid_bench
+import auto_ida.cli as ida_bench 
 import shutil
 from dataclasses import dataclass
 from itertools import chain
@@ -19,6 +20,7 @@ from rich.progress import track
 console = Console()
 app = typer.Typer()
 app.add_typer(ghid_bench.app, name="ghidra-bench")
+app.add_typer(ida_bench.app, name="ida-bench")
 
 
 from ripkit.cargo_picky import (
