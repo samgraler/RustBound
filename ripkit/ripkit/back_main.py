@@ -1,9 +1,7 @@
 import typer
-import bench_ghidra.eval_ghidra as ghid_bench
 import shutil
 from dataclasses import dataclass
 from itertools import chain
-import subprocess
 import lief
 import math
 import json
@@ -18,7 +16,6 @@ from rich.progress import track
 
 console = Console()
 app = typer.Typer()
-app.add_typer(ghid_bench.app, name="ghidra-bench")
 
 
 from ripkit.cargo_picky import (
@@ -140,6 +137,57 @@ def build_analyze_crate(crate, opt, target, filetype,
     return 0
 
 
+# Load the binary and 
+def gen_data_raw_func_bound(path: Path, output: Path):
+    #TODO: Use lief to get the .text section of the binary and but here 
+    #      (... or is it use lief to get every byte from the file and put here?...)
+
+    functions = get_functions(path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+
+    func_end_addrs = {} 
+    for start, info in func_start_addrs.items():
+        # NOTE: THIS IS IMPORTANT
+        # Ignoring functions that are of zero length
+        if info[1] > 0:
+            func_end_addrs[start+info[1]] = info[0]
+
+
+    parsed_bin = lief.parse(str(path.resolve()))
+    text_section = parsed_bin.get_section(".text")
+
+    # Get the bytes in the .text section
+    text_bytes = text_section.content
+
+    # Get the base address of the loaded binary
+    base_address = parsed_bin.imagebase
+
+    with open(output, 'w') as out:
+        for i, byte in enumerate(text_bytes):
+
+            # Starting at the text section, the address of each byte is 
+            # the base_address + the text_section's virtual address 
+            # plus the number of bytes we've gone over 
+            address = base_address + text_section.virtual_address + i
+            func_start = True if address in func_start_addrs.keys() else False
+            func_end = True if address in func_end_addrs.keys() else False
+            func_middle = True if not func_start and not func_end else False
+
+            if func_start:
+                lbl = 'F'
+            elif func_end:
+                lbl= 'R'
+            else:
+                lbl = '-'
+            line = f"{str(hex(address))[2:]} {lbl}"
+            #print(line)
+            out.write(line+'\n')
+
+    #print("WARNING THIS ONLY HAS THE .TEXT section")
+    return
+
+
 
 def get_all_bins()->dict:
     '''
@@ -182,6 +230,33 @@ def get_all_bins()->dict:
         else:
             bin_by_opt[opt].append(bin_file.resolve())
     return bin_by_opt
+
+@app.command()
+def list_functions(
+        binary: Annotated[str, typer.Argument()],
+        count: Annotated[bool, typer.Option()] = False,
+    ):
+    '''
+    Print the list of function that lief detects
+    '''
+
+    path = Path(binary)
+    functions = get_functions(path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+
+    # Fancy line to get the longest addr and round it up to 2 bytes 
+    max_len = math.ceil(max(len(str(x)) for x in func_start_addrs.keys()) / 2) * 2
+
+    for addr, info in func_start_addrs.items():
+        #print(f"0x{str(int(hex(addr),16)).zfill(max_len)}: {info[0]}")
+        #print(f"{str(hex(addr)).zfill(max_len)}: {info[0]}")
+        print(f"{hex(addr)}: {info[0]}")
+    if count:
+        print(f"{len(func_start_addrs.keys())} functions")
+
+    return
+    
 
 @app.command()
 def init():
@@ -542,6 +617,7 @@ def stats():
             print(f"Unkown | {opt}")
         print(f"    {data.files} files")
         print(f"    {data.size} bytes")
+        print(f"    {data.funcs} functions")
     return
 
 @app.command()
@@ -821,12 +897,11 @@ def export_dataset(
 
     return
 
-
 @app.command()
 def count_funcs(
-    inp: Annotated[str, typer.Argument(help="Directory containing files -or- single file")],
-    backend: Annotated[str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")]='lief',
-    list_functions: Annotated[bool, typer.Option(help="List all the functions in the given files")]=False,
+    inp_dir: Annotated[str, typer.Argument(help="Directory containing files")],
+    ignore_funcs: Annotated[bool, typer.Argument()],
+    #backend: Annotated[str, typer.Argument(help="lief, ghidra, or ida")],
     ):
     '''
     Count the functions in the .text section. Files must be non-stripped
@@ -834,111 +909,33 @@ def count_funcs(
 
     num_funcs = {}
     f_size = {}
-    lief_total = {}
-
-    # Check that the backend is good 
-    if backend not in ["lief", "ghidra", "ida", "objdump1", "objdump2", "readelf"]:
-        print(f"The backend is not in {backend}")
-        return
-
-    if Path(inp).is_dir():
-        files = list(Path(inp).glob('*'))
-    else:
-        files = [Path(inp)]
-
-
-    total_funcs = 0 
-    if backend == 'lief':
-        print("Using Lief for function boundary")
-
-        res = """
-        NOTICE: elffile seems to ignore functions injected by gcc such as 
-        "register_tm...", "deregister_tm...", 
-        Therefore those names will be included in the list, but will have 
-        a size of 0 
-            elf = ELFFile(f)
-
-            # Get the symbol table
-            symbol_table = elf.get_section_by_name('.symtab')
-
-            # Create a list of functionInfo objects... symbol_table will give a 
-            # list of symbols, grab the function sybols and get there name, 
-            # their 'st_value' which is start addr and size 
-            functionInfo = [FunctionInfo(x.name, x['st_value'], f"0x{x['st_value']:x}",x['st_size']) 
-                for x in symbol_table.iter_symbols() if x['st_info']['type'] == 'STT_FUNC']
-
-        """
-        print(res)
-    elif backend == 'ida':
-        print('nop')
-    elif backend == 'objdump1':
-        cmd = "objdump -t -f <FILE_PATH> | grep 'F .text' | sort | wc -l"
-        print(f"The command being used is {cmd}")
-    elif backend == 'objdump2':
-        cmd = "objdump -d <FILE_PATH> | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
-        print(f"The command being used is {cmd}")
-    elif backend == 'readelf':
-        cmd = "readelf -Ws <FILE_PATH> | grep FUNC | wc -l"
-        print(f"The command being used is {cmd}")
-
-    for path in alive_it(files):
+    for path in Path(inp_dir).glob('*'):
 
         f_size[path] = path.stat().st_size
+        if ignore_funcs:
+            continue
 
-        if backend == 'lief':
-            functions = get_functions(path)
-            parsed_bin = lief.parse(str(path.resolve()))
+        functions = get_functions(path)
+        parsed_bin = lief.parse(str(path.resolve()))
 
-            # Get the text session
-            text_section = parsed_bin.get_section(".text")
+        # Get the text session
+        text_section = parsed_bin.get_section(".text")
 
-            # Get the bytes in the .text section
-            text_bytes = text_section.content
+        # Get the bytes in the .text section
+        text_bytes = text_section.content
 
-            # Get the base address of the loaded binary
-            base_address = parsed_bin.imagebase
+        # Get the base address of the loaded binary
+        base_address = parsed_bin.imagebase
 
-            lief_total[path] = len(functions)
-            func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
-                                if x.addr > base_address + text_section.virtual_address and 
-                                x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+        func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
+                            if x.addr > base_address + text_section.virtual_address and 
+                            x.addr < base_address + text_section.virtual_address + len(text_bytes) }
 
-            num_funcs[path] = len(func_start_addrs.keys())
-            if list_functions:
-                for addr, (name,size) in func_start_addrs.items():
-                    print(f'{addr} : {name}')
+        num_funcs[path] = len(func_start_addrs.keys())
 
-        elif backend == 'ghidra':
-            #TODO
-            print('nop')
-        elif backend == 'ida':
-            #TODO
-            print('nop')
-        elif backend == 'objdump1':
-            #TODO
-            cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort | wc -l"
-            res = subprocess.check_output(cmd, shell=True)
-            total_funcs += int(res)
-        elif backend == 'objdump2':
-            #TODO
-            cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
-            res = subprocess.check_output(cmd, shell=True)
-            total_funcs += int(res)
-        elif backend == 'readelf':
-            #TODO
-            cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
-            res = subprocess.check_output(cmd, shell=True)
-            print(res)
-
-
-
-    if backend == 'lief':
-        print(f"lief Total funcs: {sum(lief_total.values())}")
-        print(f"Total funcs: {sum(num_funcs.values())}")
-        print(f"Total file size: {sum(f_size.values())}")
-    else:
-        print(f"Total functions: {total_funcs}")
-        print(f"Total files: {len(files)}")
+    if not ignore_funcs: print(f"Total funcs: {sum(num_funcs.values())}")
+    print(f"Total files: {len(num_funcs.keys())}")
+    print(f"Total file size: {sum(f_size.values())}")
 
     return
 

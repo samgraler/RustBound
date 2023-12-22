@@ -18,6 +18,7 @@ lief = "^0.13.2"
 alive-progress = "^3.1.4"
 matplotlib = "^3.7.2"
 rich = "^13.6.0"
+setuptools = "^69.0.2"
 
 
 [build-system]
