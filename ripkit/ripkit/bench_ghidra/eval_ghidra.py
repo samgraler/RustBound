@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from typing import List
 from pathlib import Path
 import time
@@ -208,13 +209,13 @@ def find_offset(lief_addrs, ghidra_addrs):
 
     # BUG: This is temp make sure to take it away 
     # BUG Write this to save the bnext to files 
-    with open("GHID_FUNC", 'w') as f:
-        for i, (func, bnext) in enumerate(ghid_addr_bnext):
-            f.write(f"{func} : {bnext}\n")
+    #with open("GHID_FUNC", 'w') as f:
+    #    for i, (func, bnext) in enumerate(ghid_addr_bnext):
+    #        f.write(f"{func} : {bnext}\n")
 
-    with open("LIEF_FUNC", 'w') as f:
-        for i, (func,bnext) in enumerate(lief_addrs):
-            f.write(f"{func} : {bnext}\n")
+    #with open("LIEF_FUNC", 'w') as f:
+    #    for i, (func,bnext) in enumerate(lief_addrs):
+    #        f.write(f"{func} : {bnext}\n")
 
 
 
@@ -1462,6 +1463,28 @@ def timed_bench_all(
             print(f"Recall: {recall}")
             print(f"f1: {f1}")
     return 
+
+@app.command()
+def install_ghidra():
+    '''
+    Install ghidra
+    '''
+
+
+    # get the path of this file
+    install_script = Path(os.path.abspath(__file__)).parent
+
+    # Install ghidra
+    cmd = f"{install_script.resolve()}/setup.sh"
+
+    try:
+        os.system(cmd)
+        #_ = subprocess.check_output(cmd)
+    except subprocess.CalledProcessError as e:
+        print("Error running command:", e)
+        return Path("")
+
+    return
 
 
 if __name__ == "__main__":
