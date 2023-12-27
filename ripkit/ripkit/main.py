@@ -504,13 +504,21 @@ def num_funcs(path:Path):
 @app.command()
 def stats():
     '''
-    Print stats about the rippe binaries
+    Print stats about the ripped binaries
     '''
 
     # Dict of info
     stats = { }
 
-    for parent in alive_it(Path("/home/ryan/.ripbin/ripped_bins/").iterdir()):
+    ripbin_dir = Path("~/.ripbin/ripped_bins").expanduser().resolve()
+    if not ripbin_dir.exists():
+        print(f"Ripbin dir does not exist at {ripbin_dir}")
+        return
+
+    riplist = list(ripbin_dir.iterdir())
+
+    #for parent in alive_it(Path("/home/ryan/.ripbin/ripped_bins/").iterdir()):
+    for parent in alive_it(riplist):
         info_file = parent / 'info.json'
         info = {}
         try:
