@@ -1,4 +1,5 @@
 import typer 
+import os
 import subprocess
 from typing_extensions import Annotated
 import rich 
@@ -9,6 +10,7 @@ from alive_progress import alive_it
 #from ripkit.cargo_picky import (
 #  is_executable,
 #)
+
 ripkit_dir = Path("../ripkit").resolve()
 import sys
 sys.path.append (
@@ -17,6 +19,7 @@ sys.path.append (
 from ripkit.ripbin import (
     get_functions,
 )
+
 from dataclasses import dataclass
 
 from typing import List 
@@ -72,9 +75,10 @@ def get_lief_functions(bin_path: Path):
 
 def make_ida_cmd(binary: Path, logfile: Path):
 
+    #func_list = Path("function_list.py").resolve()
 
-    func_list = Path("function_list.py").resolve()
-
+    func_list = Path(os.path.abspath(__file__)).parent / "function_list.py"
+    func_list = func_list.resolve()
     ida = Path("~/idapro-8.3/idat64").expanduser()
 
     cmd = f'{ida.resolve()} -c -A -S"{func_list.resolve()}" -L{logfile.resolve()} {binary.resolve()}'
@@ -123,6 +127,8 @@ def ida_on(binary: Annotated[str, typer.Argument(help="bin to run on")],
 
     # Run the command to run ida 
     res = subprocess.check_output(cmd,shell=True)
+    #res = subprocess.run(cmd,text=True,capture_output=True,
+    #                     universal_newlines=True)
     print(res)
 
     funcs = read_raw_log(Path(logfile))
@@ -149,6 +155,9 @@ def get_ida_funcs(file: Path):
 
     # Run the command to run ida 
     res = subprocess.check_output(cmd,shell=True)
+
+    #res = subprocess.run(cmd,text=True,capture_output=True,
+    #                     universal_newlines=True)
 
     runtime = time.time() - start
 
@@ -177,7 +186,8 @@ def count_funcs(
 
 
 @app.command()
-def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
+def batch_get_funcs(
+               inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
                out_dir: Annotated[str, typer.Argument(help="Directory to output logs")], 
                ):
     '''
@@ -209,6 +219,83 @@ def batch_get_funcs(inp_dir: Annotated[str, typer.Argument(help="Directory with 
             f.write(f"{runtime}")
 
     return 
+
+
+def read_res(inp:Path, bin, debug=False):
+
+    lief_funcs = get_functions(bin)
+    gnd = {x.addr : (x.name, x.size) for x in lief_funcs}
+    gnd_start = np.array([int(x) for x in gnd.keys()])
+
+    res = []
+    # Read the result 
+    with open(inp, 'r') as f:
+        for line in f.readlines():
+            line = line.strip().split(',')[0].strip()
+            res.append(int(line,16))
+
+
+    if debug: 
+        with open('IDA_FUNC', 'w') as f:
+            for addr in res:
+                f.write(f'{addr}\n')
+        with open('LIEF_FUNC', 'w') as f:
+            gnd_start.sort()
+            for addr in gnd_start:
+                f.write(f'{addr}\n')
+
+    # Each is a list of addresses
+    same = np.intersect1d(gnd_start, res)
+    lief_only = np.setdiff1d( gnd_start, res)
+    ida_only = np.setdiff1d( res, gnd_start )
+
+
+    return same, lief_only, ida_only
+
+
+@app.command()
+def read_results(
+        inp_dir: Annotated[str, typer.Argument(help="Directory with results")],
+        bin_dir: Annotated[str, typer.Argument(help="Directory with bins")],
+    ):
+
+    files = Path(inp_dir).glob('*')
+    bins = Path(bin_dir).glob('*')
+
+    #src = zip(files,bins)
+    src = []
+    for file in files:
+        bin = Path(f"{bin_dir}/{file.name.replace('_RESULT','')}")
+        src .append((file,bin))
+
+    tot_same = 0
+    tot_lief_only = 0
+    tot_ida_only = 0
+    debug=True
+    for (file,bin) in alive_it(src):
+        same, lief_o, ida_o = read_res(file,bin,debug)
+        debug=False
+
+        tot_same += len(same)
+        tot_lief_only += len(lief_o)
+        tot_ida_only += len(ida_o)
+
+    # Recall = # Correct Pos lbls /  # Ground Trurth Pos lbls
+    # Recall = tp / (tp+fn) 
+    recall = tot_same / (tot_same+tot_lief_only)
+
+    # Prec = #pos_lbl / #
+    # Prec = tp / (tp+fp)
+    prec = tot_same / (tot_same + tot_ida_only)
+
+    # F1 
+    f1 = (2*prec*recall)/(prec+recall)
+
+    print(f"Recall:{recall}")     
+    print(f"Prev:{prec}")
+    print(f"F1:{f1}")
+
+    return
 
 
 
