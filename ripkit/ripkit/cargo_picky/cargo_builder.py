@@ -101,13 +101,21 @@ def build_crate(crate: str,
     else:
         cmd = gen_cross_build_cmd(crate_path,target,strip, opt_lvl)
 
+    if debug:
+        print(f"Cmd {cmd}")
+
     # If the crate doesn't exist dont run
     if not crate_path.exists(): 
+        if debug: print("The crate hasn't been clone into the db yet")
         raise Exception(f"Crate {crate} has not been cloned")
     try: 
-        subprocess.check_output(cmd, shell=True,
+        if not debug:
+            subprocess.check_output(cmd, shell=True,
                                         stderr=subprocess.DEVNULL,
                                          )
+        else:
+            subprocess.check_output(cmd, shell=True)
+
     except Exception as e:
         raise CrateBuildException
     return

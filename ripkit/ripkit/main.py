@@ -1,4 +1,5 @@
 import typer
+from enum import Enum
 import bench_ghidra.eval_ghidra as ghid_bench
 import auto_ida.cli as ida_bench 
 import shutil
@@ -95,7 +96,8 @@ def build_analyze_crate(crate, opt, target, filetype,
     # Need this to get the build command 
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
-    # Need the build command for the bundle info 
+    # Need the build command for the bundle info, this is NOT used 
+    # to actually exectue a build command
     build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
 
 
@@ -204,9 +206,11 @@ def is_crate_exe(
 
 @app.command()
 def cargo_clone(
-        crate: Annotated[str, typer.Argument()]):
+        crate: Annotated[str, typer.Argument()],
+        update: Annotated[bool, typer.Option(
+                    help="Update the crate if its already cloned")] = False):
 
-    clone_crate(crate)
+    clone_crate(crate, exist_ok=update)
 
     return
 
@@ -275,14 +279,22 @@ def clone_many_exe(
             if cloned_count >= number:
                 break
 
+def get_enum_type(enum, input_string) -> Enum:
+    try:
+        return enum(input_string)
+    except Exception:
+        raise ValueError(f"No matching enum type for the string '{input_string}'")
+
 
 @app.command()
 def build(
     crate: Annotated[str, typer.Argument(help="crate name")],
     opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    bit: Annotated[str, typer.Argument(help="32 or 64")],
-    filetype: Annotated[str, typer.Argument(help="pe or elf")],
+    target: Annotated[str, typer.Argument(help="crate target")],
+    #bit: Annotated[str, typer.Argument(help="32 or 64")],
+    #filetype: Annotated[str, typer.Argument(help="pe or elf")],
     strip: Annotated[bool, typer.Option()] = False,
+    verbose: Annotated[bool, typer.Option()] = False,
     ):
     '''
     Build a crate for a specific target
@@ -301,25 +313,28 @@ def build(
         print(e)
         return
 
-    if bit == "64":
-        if filetype == "elf":
-            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
-        else:
-            print("UNknown filetype")
-            return
-    elif bit == "32":
-        if filetype == "elf":
-            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.I686_PC_WINDOWS_GNU 
-        else:
-            print("UNknown filetype")
-            return
-    else:
-        print("UNknown bit")
-        return
+    # Match the target to its enum
+    target_enum = get_enum_type(RustcTarget, target)
+
+    #if bit == "64":
+    #    if filetype == "elf":
+    #        target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
+    #    elif filetype == "pe":
+    #        target = RustcTarget.X86_64_PC_WINDOWS_GNU 
+    #    else:
+    #        print("UNknown filetype")
+    #        return
+    #elif bit == "32":
+    #    if filetype == "elf":
+    #        target = RustcTarget.I686_UNKNOWN_LINUX_GNU
+    #    elif filetype == "pe":
+    #        target = RustcTarget.I686_PC_WINDOWS_GNU 
+    #    else:
+    #        print("UNknown filetype")
+    #        return
+    #else:
+    #    print("UNknown bit")
+    #    return
 
     if not strip:
         strip_lvl = RustcStripFlags.NOSTRIP
@@ -328,11 +343,11 @@ def build(
         strip_lvl = RustcStripFlags.SYM_TABLE
 
 
-    if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-        build_crate(crate, opt, target, strip_lvl,
-                    use_cargo=True, debug=True)
+    if target_enum == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
+        build_crate(crate, opt, target_enum, strip_lvl,
+                    use_cargo=True, debug=verbose)
     else:
-        build_crate(crate, opt, target, strip_lvl,debug=True)
+        build_crate(crate, opt, target_enum, strip_lvl,use_cargo=False, debug=verbose)
 
     print(f"Crate {crate} built")
     return
@@ -956,8 +971,9 @@ def count_funcs(
 @app.command()
 def build_analyze_all(
     opt_lvl: Annotated[str, typer.Argument()],
-    bit: Annotated[int, typer.Argument()],
+    #bit: Annotated[int, typer.Argument()],
     filetype: Annotated[str, typer.Argument()],
+    target: Annotated[str, typer.Argument(help="crate target")],
     stop_on_fail: Annotated[bool,typer.Option()]=False,
     force_build_all: Annotated[bool,typer.Option()]=False,
     build_arm : Annotated[bool,typer.Option()]=False,
@@ -974,36 +990,40 @@ def build_analyze_all(
         print(e)
         return
 
+    target_enum = get_enum_type(RustcTarget, target)
 
-    if not build_arm:
-        if bit == 64:
-            if filetype == "elf":
-                target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-            elif filetype == "pe":
-                target = RustcTarget.X86_64_PC_WINDOWS_GNU 
-            else:
-                print("Invlaid filetype")
-                return
-        elif bit == 32:
-            if filetype == "elf":
-                target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-            elif filetype == "pe":
-                target = RustcTarget.I686_PC_WINDOWS_GNU 
-            else:
-                print("Invlaid filetype")
-                return
-        else:
-            print(f"Invlaid bit lvl {bit}")
-            return
-    else:
-        if bit == 64:
-            target = RustcTarget.AARCH64_UNKNOWN_LINUX_GNU 
+    #if not build_arm:
+    #    if bit == 64:
+    #        if filetype == "elf":
+    #            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
+    #        elif filetype == "pe":
+    #            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
+    #        else:
+    #            print("Invlaid filetype")
+    #            return
+    #    elif bit == 32:
+    #        if filetype == "elf":
+    #            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
+    #        elif filetype == "pe":
+    #            target = RustcTarget.I686_PC_WINDOWS_GNU 
+    #        else:
+    #            print("Invlaid filetype")
+    #            return
+    #    else:
+    #        print(f"Invlaid bit lvl {bit}")
+    #        return
+    #else:
+    #    if bit == 64:
+    #        target = RustcTarget.AARCH64_UNKNOWN_LINUX_GNU 
 
-    # List of crate current installed
-    installed_crates = [x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
+    # List of crate current installed that can be built
+    crates_to_build = [x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
     ]
 
 
+    # If we don't have to build all the crates, find the crates that 
+    # are already built with the specified optimization and arch
+    # an dremovet that from the list of installed crates
     if not force_build_all:
 
         for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
@@ -1022,15 +1042,16 @@ def build_analyze_all(
                 print(f"An error occurred: {e}")
                 continue
 
-            if info['optimization'].upper() in opt_lvl:
+            if info['optimization'].upper() in opt_lvl and \
+                info['target'].upper() in target_enum.value.upper():
                 # Remove this file from the installed crates list 
-                if (x:=info['binary_name']) in installed_crates:
-                    installed_crates.remove(x)
+                if (x:=info['binary_name']) in crates_to_build:
+                    crates_to_build.remove(x)
 
     # Any crates that are already built with the same target don't rebuild or analyze
 
     # Need to get all the analysis for the given optimization and target... 
-    crates_with_no_interest = Path(f"~/.crates_io/uninteresting_crates_cache_{target.value}").expanduser()
+    crates_with_no_interest = Path(f"~/.crates_io/uninteresting_crates_cache_{target_enum.value}").expanduser()
 
     boring_crates = []
     # If the file doesn't exist throw in the empty list
@@ -1039,19 +1060,25 @@ def build_analyze_all(
         with open(crates_with_no_interest, 'w') as f:
             json.dump({'names' : boring_crates},f)
 
+    # Add to the boring crates that aren't being built if we are 
+    # not forcing the build of all crates
     if not force_build_all:
         # If the file does exist read it, ex
         with open(crates_with_no_interest, 'r') as f:
             boring_crates.extend(json.load(f)['names'])
 
-    for x in boring_crates:
-        if x in installed_crates:
-            installed_crates.remove(x)
+    # Dont build any crate that have been found to have no executable
+    crates_to_build = [x for x in crates_to_build if 
+                        x not in boring_crates]
+
+    #for x in boring_crates:
+    #    if x in crates_to_build:
+    #        crates_to_build.remove(x)
 
     success = 0
 
     # Build and analyze each crate
-    for crate in alive_it(installed_crates):
+    for crate in alive_it(crates_to_build):
         #TODO: the following conditional is here because when building for 
         #       x86_64 linux I know that cargo will work, and I know 
         #       cargo's toolchain version 
@@ -1059,7 +1086,7 @@ def build_analyze_all(
         if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
             try:
                 res = build_analyze_crate(crate, opt, 
-                            target, filetype,
+                            target_enum, filetype,
                             RustcStripFlags.NOSTRIP,
                             use_cargo=True)
             except CrateBuildException:

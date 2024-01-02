@@ -1,4 +1,4 @@
-
+import shutil
 from pathlib import Path
 import subprocess
 import shutil
@@ -150,9 +150,16 @@ def clone_crate(crate: Union[list[str], str],
         crate = [crate]
 
     for single_crate in crate:
-        if (crate_path:=CLONED_CRATES_DIR.joinpath(single_crate)).exists() and not exist_ok:
+        crate_path = CLONED_CRATES_DIR.joinpath(single_crate)
+        if crate_path.exists() and not exist_ok:
             print(f"Crate {single_crate} alreadt exists at {crate_path}")
             continue
+        elif crate_path.exists():
+            if debug: print(f"Removing crate path {crate_path}")
+            # Remove the crate path 
+            #crate_path.unlink()
+            shutil.rmtree(crate_path)
+        
         cmd = f"cargo clone {single_crate} -- {dir.resolve()}/"
 
         try:
