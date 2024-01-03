@@ -26,6 +26,7 @@ app.add_typer(ida_bench.app, name="ida-bench")
 
 from ripkit.cargo_picky import (
     gen_cargo_build_cmd,
+    gen_cross_build_cmd,
     get_target_productions,
     is_executable,
     init_crates_io,
@@ -98,7 +99,10 @@ def build_analyze_crate(crate, opt, target, filetype,
 
     # Need the build command for the bundle info, this is NOT used 
     # to actually exectue a build command
-    build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
+    if use_cargo:
+        build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
+    else: 
+        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
 
 
     # Get files of interest from the crate at the target <target>
@@ -1094,7 +1098,7 @@ def build_analyze_all(
         else:
             try:
                 res = build_analyze_crate(crate, opt, 
-                            target, filetype,
+                            target_enum, filetype,
                             RustcStripFlags.NOSTRIP, use_cargo=False)
             except CrateBuildException:
                 print(f"Failed to build crate {crate}")
