@@ -427,6 +427,9 @@ def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:
     Save the comparison to a result json
     """
 
+    # If the file is to be stripepd strip it now 
+    bin = gen_strip_file(bin)
+
     # Creat the data dictionary to be saved
     data = {
         'binary_name' : bin.name,

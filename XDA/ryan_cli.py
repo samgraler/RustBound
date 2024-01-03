@@ -1,4 +1,5 @@
 from pathlib import Path 
+import shutil
 import time
 import random
 import json
@@ -588,6 +589,26 @@ def xda_predict_many(inp_files, model, out_dir, save_results=False, use_saved=Tr
     return tot_tp, tot_tn, tot_fp, tot_fn
 
 
+def gen_strip_file(bin_path:Path):
+    '''
+    Strip the passed file and return the path of the 
+    stripped file
+    '''
+
+    # Copy the bin and strip it 
+    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
+    shutil.copy(bin_path, Path(strip_bin))
+
+    try:
+        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
+    except subprocess.CalledProcessError as e:
+        print("Error running command:", e)
+        return Path("")
+
+    return strip_bin
+
+
+
 
 
 @app.command()
@@ -603,7 +624,8 @@ def read_log(
         'fp' : 0,
         'tn' : 0,
         'fn' : 0,
-        'fsize':0,
+        'stripped_size':0,
+        'size':0,
     }
 
 
@@ -620,7 +642,7 @@ def read_log(
     tot_runtime = 0
     for (file,bin) in files:
         # read as json, get runtime key
-        key = 'runetime'
+        key = 'runtime'
         with open(file, 'r') as f:
             data = json.load(f)
         tot_runtime += data[key]
@@ -628,11 +650,15 @@ def read_log(
         res['fp'] += data['fp']
         res['tn'] += data['tn']
         res['fp'] += data['fp']
-        res['fsize'] += bin.stat().st_size
+
+        # Stip the bin, then record the size
+        stripped_bin = gen_strip_file(bin)
+        res['size'] += bin.stat().st_size
+        res['stripped_size'] += stripped_bin.stat().st_size
 
     print(res)
-    print(tot_runtime)
-    print(res['fsize'] / tot_runtime)
+    print(f" The total runtime: {tot_runtime} seconds")
+    print(f"The BPS: {res['stripped_size'] / tot_runtime}")
     return
 
 
