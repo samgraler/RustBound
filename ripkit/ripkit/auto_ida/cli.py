@@ -1,4 +1,5 @@
 import typer 
+import shutil
 import os
 import subprocess
 from typing_extensions import Annotated
@@ -155,6 +156,7 @@ def get_ida_funcs(file: Path):
 
     # Run the command to run ida 
     res = subprocess.check_output(cmd,shell=True)
+    print(res)
 
     #res = subprocess.run(cmd,text=True,capture_output=True,
     #                     universal_newlines=True)
@@ -184,28 +186,65 @@ def count_funcs(
 
     return
 
+def gen_strip_file(bin_path:Path):
+    '''
+    Strip the passed file and return the path of the 
+    stripped file
+    '''
+
+    # Copy the bin and strip it 
+    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
+    shutil.copy(bin_path, Path(strip_bin))
+
+    try:
+        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
+    except subprocess.CalledProcessError as e:
+        print("Error running command:", e)
+        return Path("")
+
+    return strip_bin
+
+
 
 @app.command()
 def batch_get_funcs(
                inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
                out_dir: Annotated[str, typer.Argument(help="Directory to output logs")], 
+               strip: Annotated[bool, typer.Option(help="Strip the files before running")] = False, 
                ):
     '''
     Batch run ida on bins
     '''
 
-    if not Path(out_dir).exists():
-        print(f"{out_dir} does nto exist")
+    out_path = Path(out_dir)
+
+    if not out_path.exists():
+        out_path.mkdir()
         return
 
-    time_dir = Path(out_dir).parent / f"{Path(out_dir).name}_TIME"
-    time_dir.mkdir()
+    # Make the time dir
+    time_dir = out_path.parent / f"{Path(out_dir).name}_TIME"
+    if not time_dir.exists():
+        time_dir.mkdir()
+
+    # Get a list of files
+    files = list(Path(inp_dir).rglob('*'))
 
     # For each file get the functions from IDA 
-    for file in alive_it(Path(inp_dir).rglob('*')):
+    for file in alive_it(files):
+
+        # If strip, strip the file 
+        if strip:
+            nonstrip = file
+            file =  gen_strip_file(file)
 
         # Ge the ida funcs
         funcs, runtime = get_ida_funcs(file)
+
+        # Delete the stripped file
+        if strip:
+            file.unlink()
+            file = nonstrip
 
         # The result file a a path obj
         resfile = Path(out_dir) / f"{file.name}_RESULT"
@@ -257,12 +296,26 @@ def read_res(inp:Path, bin, debug=False):
 def read_results(
         inp_dir: Annotated[str, typer.Argument(help="Directory with results")],
         bin_dir: Annotated[str, typer.Argument(help="Directory with bins")],
+        time_dir: Annotated[str, typer.Argument(help="Directory with time")],
     ):
 
     files = Path(inp_dir).glob('*')
     bins = Path(bin_dir).glob('*')
 
-    #src = zip(files,bins)
+
+    tot_size = 0
+    # Get the size of the stripped bins 
+    for bin in bins:
+        stripped_bin = gen_strip_file(bin)
+        tot_size+=stripped_bin.stat().st_size
+        stripped_bin.unlink()
+
+    tot_time = 0
+    for bin in Path(time_dir).rglob('*'):
+        with open(bin, 'r') as inp:
+            tot_time += float(inp.readline().strip())
+
+
     src = []
     for file in files:
         bin = Path(f"{bin_dir}/{file.name.replace('_RESULT','')}")
@@ -294,6 +347,9 @@ def read_results(
     print(f"Recall:{recall}")     
     print(f"Prev:{prec}")
     print(f"F1:{f1}")
+    print(f"Size:{tot_size}")
+    print(f"Time:{tot_time}")
+    print(f"BPS:{tot_size/tot_time}")
 
     return
 

@@ -127,6 +127,7 @@ def call_ghidra(
         output = subprocess.run(cmd_str, text=True,
                                 capture_output=True,
                                 universal_newlines=True)
+        print(output.stdout)
 
         # Get the runtime 
         runtime = time.time() - start
@@ -151,13 +152,8 @@ def get_ghidra_functions(bin_path, post_script: Path =
 
     print(f"FLAGS: {other_flags}")
 
-    # Start time of process
-    start = time.time()
-
     # Run ghidra 
     res, runtime = call_ghidra(bin_path, other_flags)
-
-
 
     # If it was a good run read the stdout
     #TODO: Check for bad run 
@@ -209,13 +205,13 @@ def find_offset(lief_addrs, ghidra_addrs):
 
     # BUG: This is temp make sure to take it away 
     # BUG Write this to save the bnext to files 
-    #with open("GHID_FUNC", 'w') as f:
-    #    for i, (func, bnext) in enumerate(ghid_addr_bnext):
-    #        f.write(f"{func} : {bnext}\n")
+    with open("GHID_FUNC", 'w') as f:
+        for i, (func, bnext) in enumerate(ghid_addr_bnext):
+            f.write(f"{func} : {bnext}\n")
 
-    #with open("LIEF_FUNC", 'w') as f:
-    #    for i, (func,bnext) in enumerate(lief_addrs):
-    #        f.write(f"{func} : {bnext}\n")
+    with open("LIEF_FUNC", 'w') as f:
+        for i, (func,bnext) in enumerate(lief_addrs):
+            f.write(f"{func} : {bnext}\n")
 
 
 
@@ -286,13 +282,19 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
     # Get the functions from lief
     lief_functions =  get_lief_functions(bin_path)
 
+    print(f"LIEF FUNCS: {len(lief_functions.addresses)}")
+
     # Strip the file is desired:
     if strip_file:
         bin_path = gen_strip_file(bin_path)
 
+    post_script = Path(os.path.abspath(__file__)).parent / "List_Function_and_Entry.py"
+
     # Get the functons from ghidra 
-    ghidra_functions, runtime = get_ghidra_functions(bin_path,
+    ghidra_functions, runtime = get_ghidra_functions(bin_path, post_script=post_script.resolve(),
                                     other_flags=ghidra_flags)
+
+    print(f"GHIDRA FUNCS: {len(ghidra_functions.addresses)}")
 
     #TODO: Offset 
     # Need to apply the offset to the ghidra functions 
@@ -402,9 +404,12 @@ def read_comparison_dir(
         recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
         f1 = 2 * prec* recall / (prec+recall)
 
-    print(f"Prec: {prec}")
-    print(f"Recall: {recall}")
-    print(f"F1 : {f1}")
+        print(f"Prec: {prec}")
+        print(f"Recall: {recall}")
+        print(f"F1 : {f1}")
+    else:
+        print(f"Analyzed tp is 0")
+
 
 
     print("+=====================+")
@@ -441,6 +446,9 @@ def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:
         'runtime' : runtime,
         'filesize' : bin.stat().st_size
     }
+
+    # Delete the stripped version of the binary
+    bin.unlink()
 
     # Dump the file to the json file
     with open(out_file, 'w') as f:
@@ -785,126 +793,127 @@ def func_addrs_timed_bench(
 
     # Parse the result from the ghidra run
     funcs = parse_for_functions(res.stdout)
+    print(f"IN FUNCS: {len(funcs.addresses)}")
 
     return list(funcs.addresses), runtime
    
 
-def NEW_ghidra_bench_functions(
-    bin_path: Path, 
-    post_script: Path = Path("~/ghidra_scripts/List_Function_and_Entry.py").expanduser(),
-    script_path: Path = Path("~/ghidra_scripts/").expanduser(),
-    analyzer: Path = Path("~/ghidra_10.3.3_PUBLIC/support/analyzeHeadless").expanduser().resolve(),
-    verbose=False,
-    no_analysis=False):
-
-
-    # Load ground truth 
-    ground_truth = parse_ground_truth(bin_path)
-    gnd_addrs = [x[0] for x in ground_truth]
-
-    # Run ghidra and get the address of the function and the runtime 
-    # for ghidra's analysis
-    nonstrip_funcs, nonstrip_runtime = func_addrs_timed_bench(bin_path,
-                                post_script, script_path, analyzer,
-                                no_analysis=no_analysis)
-
-    # Find the offset for the ghidra addrs and apply it
-    offset =  find_ghidra_offset(ground_truth, nonstrip_funcs)
-
-    print(f"The max nonstrip func is {max(nonstrip_funcs)}")
-    print(f"The min nonstrip func is {min(nonstrip_funcs)}")
-
-    nonstrip_func_addrs = [x-offset for x in nonstrip_funcs
-            if x-offset > min(gnd_addrs) and 
-                x-offset < max(gnd_addrs)]
-
-
-    # Copy the bin and strip it 
-    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
-    strip_bin = strip_bin.resolve()
-    shutil.copy(bin_path, Path(strip_bin))
-    print(f"The new bin is at {strip_bin}")
-
-    try:
-        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
-    except subprocess.CalledProcessError as e:
-        print("Error running command:", e)
-        return []
-
-    # Run ghidra on stripped bin and get function list - and time it 
-    strip_res, strip_runtime = timed_ghidra_run(strip_bin , post_script, 
-                                                script_path, analyzer,
-                                                no_analysis=no_analysis)
-
-    #TODO: Why doesn't ghidra apply the offset for the 
-    #   stripped version of files
-    # BUG It does appy the offset for stripped version with no anaylsis 
-    strip_funcs = parse_for_functions(strip_res.stdout)
-    strip_funcs = list(strip_funcs.addresses)
-
-    if no_analysis is True:
-        offset =  find_ghidra_offset(ground_truth, strip_funcs)
-        print(f"Using an offset of {offset}")
-        strip_funcs = [x-offset for x in strip_funcs]
-
-    print(f"The length of strip funcs is {len(strip_funcs)}")
-
-    # Delete the stripped binary
-    strip_bin.unlink()
-
-    # Only include the addrs that are in the .text section
-    strip_func_addrs = [x for x in strip_funcs if 
-        x > min(gnd_addrs) and x < max(gnd_addrs) 
-    ]
-
-    # Get the overlaps and unique values in the lists
-    #nonstrip_v_truth = list_operations(nonstrip_func_addrs, gnd_addrs)
-    #strip_v_truth = list_operations(strip_func_addrs, gnd_addrs)
-    #nonstrip_v_strip = list_operations(nonstrip_func_addrs, gnd_addrs)
-
-    nonstrip_v_truth = list_operations_raw_values(nonstrip_func_addrs, gnd_addrs)
-
-    print("NONSTRIP !!!!!!!!!!!!!!!!!!!!!!!!!")
-    print(f"Nonstrip TP: {len(nonstrip_v_truth[0])}")
-
-    strip_v_truth = list_operations_raw_values(strip_func_addrs, gnd_addrs)
-    nonstrip_v_strip = list_operations_raw_values(nonstrip_func_addrs, gnd_addrs)
-
-    print("NONSTRIP !!!!!!!!!!!!!!!!!!!!!!!!!")
-    print(f"AGAIN Nonstrip TP: {len(nonstrip_v_truth[0])}")
-
-    print("HHHHHHHHHHHHHHHEEEEEEEEEEEEEEEEEEEEEEEEEEEERRRRRRR")
-    print(f" strip_v_truch...")
-    print(f"Strip has {len(strip_func_addrs)}")
-    print(f"The interesetiob has {len(strip_v_truth[0])}")
-    print(f"The strip has unique {len(strip_v_truth[1])})")
-    print(f"The gnd has unqie {len(strip_v_truth[2])})")
-
-    #if verbose:
-    #    print(f"Lief first func : {min(ground_truth)}")
-    #    print(f"Ghid first func : {min(nonstrip_func_addrs)}")
-    #          
-    #    print(f"Total lief functions {len(ground_truth)}")
-    #    print(f"Total ghidra in .text {len(nonstrip_func_addrs)}")
-
-    #    print(f"Nonstrip: {len(nonstrip_v_truth.intersection)} true pos")
-    #    print(f"Nonstrip: {len(nonstrip_v_truth.b_only)} false neg")
-    #    print(f"Nonstrip: {len(nonstrip_v_truth.a_only)} false pos")
-
-    #    print(f"strip: {len(strip_v_truth.intersection)} tru pos")
-    #    print(f"strip: {len(strip_v_truth.b_only)} false neg")
-    #    print(f"strip: {len(strip_v_truth.a_only)} false pos")
-
-    result = {
-            'nonstrip_v_gnd' : nonstrip_v_truth,
-            'strip_v_gnd' : strip_v_truth,
-            'nonstrip_v_strip' : nonstrip_v_strip,
-            'nonstrip_runtime' : nonstrip_runtime,
-            'strip_runtime' : strip_runtime,
-            'gnd_addrs' :  gnd_addrs,
-            }
-
-    return result 
+#def NEW_ghidra_bench_functions(
+#    bin_path: Path, 
+#    post_script: Path = Path("~/ghidra_scripts/List_Function_and_Entry.py").expanduser(),
+#    script_path: Path = Path("~/ghidra_scripts/").expanduser(),
+#    analyzer: Path = Path("~/ghidra_10.3.3_PUBLIC/support/analyzeHeadless").expanduser().resolve(),
+#    verbose=False,
+#    no_analysis=False):
+#
+#
+#    # Load ground truth 
+#    ground_truth = parse_ground_truth(bin_path)
+#    gnd_addrs = [x[0] for x in ground_truth]
+#
+#    # Run ghidra and get the address of the function and the runtime 
+#    # for ghidra's analysis
+#    nonstrip_funcs, nonstrip_runtime = func_addrs_timed_bench(bin_path,
+#                                post_script, script_path, analyzer,
+#                                no_analysis=no_analysis)
+#
+#    # Find the offset for the ghidra addrs and apply it
+#    offset =  find_ghidra_offset(ground_truth, nonstrip_funcs)
+#
+#    print(f"The max nonstrip func is {max(nonstrip_funcs)}")
+#    print(f"The min nonstrip func is {min(nonstrip_funcs)}")
+#
+#    nonstrip_func_addrs = [x-offset for x in nonstrip_funcs
+#            if x-offset > min(gnd_addrs) and 
+#                x-offset < max(gnd_addrs)]
+#
+#
+#    # Copy the bin and strip it 
+#    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
+#    strip_bin = strip_bin.resolve()
+#    shutil.copy(bin_path, Path(strip_bin))
+#    print(f"The new bin is at {strip_bin}")
+#
+#    try:
+#        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
+#    except subprocess.CalledProcessError as e:
+#        print("Error running command:", e)
+#        return []
+#
+#    # Run ghidra on stripped bin and get function list - and time it 
+#    strip_res, strip_runtime = timed_ghidra_run(strip_bin , post_script, 
+#                                                script_path, analyzer,
+#                                                no_analysis=no_analysis)
+#
+#    #TODO: Why doesn't ghidra apply the offset for the 
+#    #   stripped version of files
+#    # BUG It does appy the offset for stripped version with no anaylsis 
+#    strip_funcs = parse_for_functions(strip_res.stdout)
+#    strip_funcs = list(strip_funcs.addresses)
+#
+#    if no_analysis is True:
+#        offset =  find_ghidra_offset(ground_truth, strip_funcs)
+#        print(f"Using an offset of {offset}")
+#        strip_funcs = [x-offset for x in strip_funcs]
+#
+#    print(f"The length of strip funcs is {len(strip_funcs)}")
+#
+#    # Delete the stripped binary
+#    strip_bin.unlink()
+#
+#    # Only include the addrs that are in the .text section
+#    strip_func_addrs = [x for x in strip_funcs if 
+#        x > min(gnd_addrs) and x < max(gnd_addrs) 
+#    ]
+#
+#    # Get the overlaps and unique values in the lists
+#    #nonstrip_v_truth = list_operations(nonstrip_func_addrs, gnd_addrs)
+#    #strip_v_truth = list_operations(strip_func_addrs, gnd_addrs)
+#    #nonstrip_v_strip = list_operations(nonstrip_func_addrs, gnd_addrs)
+#
+#    nonstrip_v_truth = list_operations_raw_values(nonstrip_func_addrs, gnd_addrs)
+#
+#    print("NONSTRIP !!!!!!!!!!!!!!!!!!!!!!!!!")
+#    print(f"Nonstrip TP: {len(nonstrip_v_truth[0])}")
+#
+#    strip_v_truth = list_operations_raw_values(strip_func_addrs, gnd_addrs)
+#    nonstrip_v_strip = list_operations_raw_values(nonstrip_func_addrs, gnd_addrs)
+#
+#    print("NONSTRIP !!!!!!!!!!!!!!!!!!!!!!!!!")
+#    print(f"AGAIN Nonstrip TP: {len(nonstrip_v_truth[0])}")
+#
+#    print("HHHHHHHHHHHHHHHEEEEEEEEEEEEEEEEEEEEEEEEEEEERRRRRRR")
+#    print(f" strip_v_truch...")
+#    print(f"Strip has {len(strip_func_addrs)}")
+#    print(f"The interesetiob has {len(strip_v_truth[0])}")
+#    print(f"The strip has unique {len(strip_v_truth[1])})")
+#    print(f"The gnd has unqie {len(strip_v_truth[2])})")
+#
+#    #if verbose:
+#    #    print(f"Lief first func : {min(ground_truth)}")
+#    #    print(f"Ghid first func : {min(nonstrip_func_addrs)}")
+#    #          
+#    #    print(f"Total lief functions {len(ground_truth)}")
+#    #    print(f"Total ghidra in .text {len(nonstrip_func_addrs)}")
+#
+#    #    print(f"Nonstrip: {len(nonstrip_v_truth.intersection)} true pos")
+#    #    print(f"Nonstrip: {len(nonstrip_v_truth.b_only)} false neg")
+#    #    print(f"Nonstrip: {len(nonstrip_v_truth.a_only)} false pos")
+#
+#    #    print(f"strip: {len(strip_v_truth.intersection)} tru pos")
+#    #    print(f"strip: {len(strip_v_truth.b_only)} false neg")
+#    #    print(f"strip: {len(strip_v_truth.a_only)} false pos")
+#
+#    result = {
+#            'nonstrip_v_gnd' : nonstrip_v_truth,
+#            'strip_v_gnd' : strip_v_truth,
+#            'nonstrip_v_strip' : nonstrip_v_strip,
+#            'nonstrip_runtime' : nonstrip_runtime,
+#            'strip_runtime' : strip_runtime,
+#            'gnd_addrs' :  gnd_addrs,
+#            }
+#
+#    return result 
  
 
 def create_dual_plots(bar_value1, bar_value2, bar_value3, pie_found, pie_total, labels_bar, labels_pie):
@@ -1024,455 +1033,454 @@ def count_inbetween(
 # TODO: rewrite this to follow the standard in cli_test 
 #       and batch_test_ghidra
 #@app.command()
-def bench_single(
-        bin_file: Annotated[str, typer.Argument()],
-        no_analysis: Annotated[bool, typer.Argument()]):
-
-
-    file = Path(bin_file)
-
-    #res =  ghidra_bench_functions(file,verbose=True)
-    res =  NEW_ghidra_bench_functions(file,verbose=True, 
-                                      no_analysis=no_analysis)
-
-    # False neg 
-    #false_neg = res['strip_v_gnd'].b_only
-    false_neg = res['strip_v_gnd'][2]
-
-    # False Positive
-    #false_pos = res['strip_v_gnd'].a_only
-    false_pos = res['strip_v_gnd'][1]
-
-    # True Positive
-    true_pos = res['strip_v_gnd'][0]
-
-    # Recall 
-    # Precision 
-    # F1
-    recall = len(true_pos) / (len(true_pos) + len(false_neg))
-    precision = len(true_pos) / (len(true_pos) + len(false_pos))
-    f1 = 2 * precision * recall / (precision+recall)
-
-    print(len(true_pos))
-    print(len(false_pos))
-    print(len(false_neg))
-    print(f"F1 : {f1}")
-    return
+#def bench_single(
+#        bin_file: Annotated[str, typer.Argument()],
+#        no_analysis: Annotated[bool, typer.Argument()]):
+#
+#
+#    file = Path(bin_file)
+#
+#    #res =  ghidra_bench_functions(file,verbose=True)
+#    res =  NEW_ghidra_bench_functions(file,verbose=True, 
+#                                      no_analysis=no_analysis)
+#
+#    # False neg 
+#    #false_neg = res['strip_v_gnd'].b_only
+#    false_neg = res['strip_v_gnd'][2]
+#
+#    # False Positive
+#    #false_pos = res['strip_v_gnd'].a_only
+#    false_pos = res['strip_v_gnd'][1]
+#
+#    # True Positive
+#    true_pos = res['strip_v_gnd'][0]
+#
+#    # Recall 
+#    # Precision 
+#    # F1
+#    recall = len(true_pos) / (len(true_pos) + len(false_neg))
+#    precision = len(true_pos) / (len(true_pos) + len(false_pos))
+#    f1 = 2 * precision * recall / (precision+recall)
+#
+#    print(len(true_pos))
+#    print(len(false_pos))
+#    print(len(false_neg))
+#    print(f"F1 : {f1}")
+#    return
 
 
 #@app.command()
 # TODO: Rewrite to follow the standard set in cli_test
-def bench(
-    opt_lvl: Annotated[str, typer.Argument()],
-    output_dir: Annotated[str, typer.Option()] = "ghidra_bench_results/",
-    cache_analysis_info: Annotated[bool,typer.Option()] = True,
-    show_summary: Annotated[bool,typer.Option()] = True,
-    verbose: Annotated[bool,typer.Option()] = False,
-    no_analysis: Annotated[bool,typer.Option()] = False,
-    ):
-
-    if opt_lvl.upper() not in ['O0','O1', 'O2', 'O3','OS', 'OZ']:
-        print("Unknown opt lvl")
-        return
-
-    # The base output dir
-    OUT_DIR = Path(output_dir)
-
-    # Summary file
-    LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}.json")
-
-    # If the summary file exists append a value to the new ones
-    count = 0
-    while LOG_FILE.exists():
-        LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}_rev{count}.json")
-        count+=1
-
-    bins = []
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        info_file = parent / 'info.json'
-        info = {}
-        try:
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
-
-        if info['optimization'] == opt_lvl[1]:
-            #npz_file = parent / "onehot_plus_func_labels.npz"
-            bin = [x for x in parent.iterdir() 
-                if ".npz" not in x.name and ".json" not in x.name][0]
-            bins.append(bin)
-
-    # Only run on the last 30 files
-    bins = bins[31:]
-    #total_results = []
-
-    tot_true_pos = 0
-    tot_true_neg = 0
-    tot_false_pos = 0
-    tot_false_neg = 0
-    for bin_path in alive_it(bins):
-
-        if not bin_path.exists():
-            continue
-
-        if verbose:
-            print(f"Running ghidra on binary {bin_path.name}")
-
-        # The file data
-        FILE_DATA =  OUT_DIR / f"{bin_path.name}_{opt_lvl}.json"
-
-        if FILE_DATA.exists():
-            with open(FILE_DATA,'r') as inp_f:
-                res = json.load(inp_f)
-            res = list(res.values())[0]
-            print(f"Using cache for {bin_path.name} at {FILE_DATA.parent}/{FILE_DATA.name}")
-        else:
-            #res =  ghidra_bench_functions(bin_path)
-            res =  NEW_ghidra_bench_functions(bin_path, no_analysis=no_analysis)
-        #total_results.append(res)
-
-        if verbose:
-            print(f"Results: {bin_path}")
-            print("=========")
-            print(f"Nonstrip | Functions: {len(res[0][0])} Unique {len(res[0][1])}")
-            print(f"Strip | Functions: {len(res[1][0])} Unique {len(res[1][1])}")
-
-
-        # False Negative - Functions in nonstrip that arent in strip
-        false_neg = res[0][1]
-        tot_false_neg += len(false_neg)
-
-        # False Positive
-        false_pos = res[1][1]
-        tot_false_pos += len(false_pos)
-
-        # True Positive
-        strip_total_func = res[1][0]
-        true_pos = [x for x in strip_total_func if x not in false_pos]
-        tot_true_pos += len(true_pos)
-
-
-        # Recall 
-        recall = len(true_pos) / (len(true_pos) + len(false_neg))
-
-        # Precision 
-        precision = len(true_pos) / (len(true_pos) + len(false_pos))
-
-        # F1
-        f1 = 2 * precision * recall / (precision+recall)
-
-
-        data = {
-            'name': bin_path.name,
-            'true_pos' : true_pos,
-            'false_neg': false_neg,
-            'false_pos': false_pos,
-            'recall' : recall,
-            'precision' : precision,
-            'f1' : f1,
-        }
-
-
-
-        if not OUT_DIR.exists():
-            OUT_DIR.mkdir()
-
-
-        # Cache the result of the run
-        if cache_analysis_info:
-            with open(FILE_DATA, 'w') as f:
-                json.dump({FILE_DATA.name : res},f)
-
-        cur_data = {}
-        if LOG_FILE.exists():
-            with open(LOG_FILE,'r') as f:
-                cur_data = json.load(f)
-                cur_data[bin_path.name] = data
-        with open(LOG_FILE,'w') as f:
-            json.dump(cur_data,f)
-
-    if show_summary:
-
-        # Recall 
-        recall = tot_true_pos / (tot_true_pos + tot_false_neg)
-
-        # Precision 
-        precision = tot_true_pos / (tot_true_pos + tot_false_pos)
-
-        # F1
-        f1 = 2 * precision * recall / (precision+recall)
-
-
-        print(f"Results for {opt_lvl}... {len(bins)} files")
-        print("------------------------------------------")
-        print(f"Total functions: {tot_true_pos+tot_false_neg}")
-        print(f"True Positive: {tot_true_pos}")
-        print(f"False Negative: {tot_false_neg}")
-        print(f"False Positive: {tot_false_pos}")
-        print(f"Precision: {precision}")
-        print(f"Recall: {recall}")
-        print(f"f1: {f1}")
-    return 
+#def bench(
+#    opt_lvl: Annotated[str, typer.Argument()],
+#    output_dir: Annotated[str, typer.Option()] = "ghidra_bench_results/",
+#    cache_analysis_info: Annotated[bool,typer.Option()] = True,
+#    show_summary: Annotated[bool,typer.Option()] = True,
+#    verbose: Annotated[bool,typer.Option()] = False,
+#    no_analysis: Annotated[bool,typer.Option()] = False,
+#    ):
+#
+#    if opt_lvl.upper() not in ['O0','O1', 'O2', 'O3','OS', 'OZ']:
+#        print("Unknown opt lvl")
+#        return
+#
+#    # The base output dir
+#    OUT_DIR = Path(output_dir)
+#
+#    # Summary file
+#    LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}.json")
+#
+#    # If the summary file exists append a value to the new ones
+#    count = 0
+#    while LOG_FILE.exists():
+#        LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}_rev{count}.json")
+#        count+=1
+#
+#    bins = []
+#    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#        info_file = parent / 'info.json'
+#        info = {}
+#        try:
+#            with open(info_file, 'r') as f:
+#                info = json.load(f)
+#        except FileNotFoundError:
+#            print(f"File not found: {info_file}")
+#            continue
+#        except json.JSONDecodeError as e:
+#            print(f"JSON decoding error: {e}")
+#            continue
+#        except Exception as e:
+#            print(f"An error occurred: {e}")
+#            continue
+#
+#        if info['optimization'] == opt_lvl[1]:
+#            #npz_file = parent / "onehot_plus_func_labels.npz"
+#            bin = [x for x in parent.iterdir() 
+#                if ".npz" not in x.name and ".json" not in x.name][0]
+#            bins.append(bin)
+#
+#    # Only run on the last 30 files
+#    bins = bins[31:]
+#    #total_results = []
+#
+#    tot_true_pos = 0
+#    tot_true_neg = 0
+#    tot_false_pos = 0
+#    tot_false_neg = 0
+#    for bin_path in alive_it(bins):
+#
+#        if not bin_path.exists():
+#            continue
+#
+#        if verbose:
+#            print(f"Running ghidra on binary {bin_path.name}")
+#
+#        # The file data
+#        FILE_DATA =  OUT_DIR / f"{bin_path.name}_{opt_lvl}.json"
+#
+#        if FILE_DATA.exists():
+#            with open(FILE_DATA,'r') as inp_f:
+#                res = json.load(inp_f)
+#            res = list(res.values())[0]
+#            print(f"Using cache for {bin_path.name} at {FILE_DATA.parent}/{FILE_DATA.name}")
+#        else:
+#            #res =  ghidra_bench_functions(bin_path)
+#            res =  NEW_ghidra_bench_functions(bin_path, no_analysis=no_analysis)
+#        #total_results.append(res)
+#
+#        if verbose:
+#            print(f"Results: {bin_path}")
+#            print("=========")
+#            print(f"Nonstrip | Functions: {len(res[0][0])} Unique {len(res[0][1])}")
+#            print(f"Strip | Functions: {len(res[1][0])} Unique {len(res[1][1])}")
+#
+#
+#        # False Negative - Functions in nonstrip that arent in strip
+#        false_neg = res[0][1]
+#        tot_false_neg += len(false_neg)
+#
+#        # False Positive
+#        false_pos = res[1][1]
+#        tot_false_pos += len(false_pos)
+#
+#        # True Positive
+#        strip_total_func = res[1][0]
+#        true_pos = [x for x in strip_total_func if x not in false_pos]
+#        tot_true_pos += len(true_pos)
+#
+#
+#        # Recall 
+#        recall = len(true_pos) / (len(true_pos) + len(false_neg))
+#
+#        # Precision 
+#        precision = len(true_pos) / (len(true_pos) + len(false_pos))
+#
+#        # F1
+#        f1 = 2 * precision * recall / (precision+recall)
+#
+#
+#        data = {
+#            'name': bin_path.name,
+#            'true_pos' : true_pos,
+#            'false_neg': false_neg,
+#            'false_pos': false_pos,
+#            'recall' : recall,
+#            'precision' : precision,
+#            'f1' : f1,
+#        }
+#
+#
+#
+#        if not OUT_DIR.exists():
+#            OUT_DIR.mkdir()
+#
+#
+#        # Cache the result of the run
+#        if cache_analysis_info:
+#            with open(FILE_DATA, 'w') as f:
+#                json.dump({FILE_DATA.name : res},f)
+#
+#        cur_data = {}
+#        if LOG_FILE.exists():
+#            with open(LOG_FILE,'r') as f:
+#                cur_data = json.load(f)
+#                cur_data[bin_path.name] = data
+#        with open(LOG_FILE,'w') as f:
+#            json.dump(cur_data,f)
+#
+#    if show_summary:
+#
+#        # Recall 
+#        recall = tot_true_pos / (tot_true_pos + tot_false_neg)
+#
+#        # Precision 
+#        precision = tot_true_pos / (tot_true_pos + tot_false_pos)
+#
+#        # F1
+#        f1 = 2 * precision * recall / (precision+recall)
+#
+#
+#        print(f"Results for {opt_lvl}... {len(bins)} files")
+#        print("------------------------------------------")
+#        print(f"Total functions: {tot_true_pos+tot_false_neg}")
+#        print(f"True Positive: {tot_true_pos}")
+#        print(f"False Negative: {tot_false_neg}")
+#        print(f"False Positive: {tot_false_pos}")
+#        print(f"Precision: {precision}")
+#        print(f"Recall: {recall}")
+#        print(f"f1: {f1}")
+#    return 
 
 # TODO: New implementation of this that uses the standard 
 #       set in cli_test and batch_test_
 #@app.command()
-def timed_bench_all(
-    output_dir: Annotated[str, typer.Option()] = ".NEW_timed_ghidra_bench/",
-    cache_analysis_info: Annotated[bool,typer.Option()] = True,
-    show_summary: Annotated[bool,typer.Option()] = True,
-    cache_dataset: Annotated[bool,typer.Option()] = True,
-    verbose: Annotated[bool,typer.Option()] = False,
-    bin_file_name: Annotated[str,typer.Option()] = "",
-    ):
-
-    using_bin_file = False 
-    if bin_file_name != "":
-        using_bin_file = True
-        with open('XDA_DATASET_SPLITS', 'r') as f:
-            list_o_bins = [x.strip() for x in f.read().split(',')]
-
-        #print(list_o_bins)
-        print(f"Using {len(list_o_bins)} bins")
-
-    opt_lvls = ['O0','O1', 'O2', 'O3','OS', 'OZ']
-
-    # The base output dir
-    OUT_DIR = Path(output_dir)
-
-    bins_per_opt_lvl = {}
-    for opt_lvl in opt_lvls:
-        bins = []
-        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-            info_file = parent / 'info.json'
-            info = {}
-            try:
-                with open(info_file, 'r') as f:
-                    info = json.load(f)
-            except FileNotFoundError:
-                print(f"File not found: {info_file}")
-                continue
-            except json.JSONDecodeError as e:
-                print(f"JSON decoding error: {e}")
-                continue
-            except Exception as e:
-                print(f"An error occurred: {e}")
-                continue
-
-            if info['optimization'].upper() == opt_lvl[1]:
-                #npz_file = parent / "onehot_plus_func_labels.npz"
-
-                if using_bin_file:
-                    bin_name = info['binary_name'].lower()
-                    if bin_name in list_o_bins:
-                        bin = parent / info['binary_name']
-                        bins.append(bin)
-                        print(f"Bin len {len(bins)}")
-                        #print(f"skipping bin {bin_name}")
-                else:
-                    bin = parent / info['binary_name']
-                    bins.append(bin)
-
-        # Add this list of binary files to the bins_per_opt_lvl with the 
-        # opt lvl as keey
-        bins_per_opt_lvl[opt_lvl] = bins
-
-
-    # Need a set of all binaries in the dictionary
-    testable_binary_names = [x.name for x in set(chain.from_iterable(bins_per_opt_lvl.values()))]
-    #print(testable_binary_names)
-
-    testable_binary_dict = {k:[x for x in v if x.name in testable_binary_names] for k,v in bins_per_opt_lvl.items() }
-    testable_binary_dict_stringify = {k:[x.name for x in v if x.name in testable_binary_names] for k,v in bins_per_opt_lvl.items() }
-
-
-    if cache_dataset:
-        cache_dir = Path(".ghidra_cached_dataset")
-        if not cache_dir.exists():
-            cache_dir.mkdir()
-
-        dataset_file = cache_dir / Path("cached_dataset.json")
-
-        with open(dataset_file, 'w') as f:
-            json.dump(testable_binary_dict_stringify,f)
-
-
-    for opt_lvl in opt_lvls:
-        # Summary file
-        LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}.json")
-
-        # If the summary file exists append a value to the new ones
-        count = 0
-        while LOG_FILE.exists():
-            LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}_rev{count}.json")
-            count+=1
-
-        bins = testable_binary_dict[opt_lvl]
-
-        tot_true_pos = 0
-        tot_false_pos = 0
-        tot_false_neg = 0
-        noa_tot_true_pos = 0
-        noa_tot_false_pos = 0
-        noa_tot_false_neg = 0
-        for bin_path in alive_it(bins):
-
-            if not bin_path.exists():
-                continue
-
-            if verbose:
-                print(f"Running ghidra on binary {bin_path.name}")
-
-            # The file data
-            FILE_DATA =  OUT_DIR / f"{bin_path.name}_{opt_lvl}.json"
-
-            # Get the results from the bench functions
-            res =  NEW_ghidra_bench_functions(bin_path)
-
-            # Run the noanalysis bench mark
-            noanalysis_res = NEW_ghidra_bench_functions(bin_path,
-                                                    no_analysis=True)
-
-            # False Negative - Functions in nonstrip that arent in strip
-            #false_neg = res['strip_v_gnd'].b_only
-            false_neg = res['nonstrip_v_gnd'][2]
-            tot_false_neg += len(false_neg)
-
-            # False Positive
-            #false_pos = res['strip_v_gnd'].a_only
-            false_pos = res['nonstrip_v_gnd'][1]
-            tot_false_pos += len(false_pos)
-
-            # True Positive
-            true_pos = res['nonstrip_v_gnd'][0]
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(f"DIFFERENT TURE POS {true_pos}")
-            tot_true_pos += len(true_pos)
-
-            # Recall 
-            # Precision 
-            # F1
-            if len(true_pos) + len(false_neg) != 0 :
-                recall = len(true_pos) / (len(true_pos) + len(false_neg))
-            else:
-                recall = 0
-
-            if len(true_pos) + len(false_pos) != 0 :
-                precision = len(true_pos) / (len(true_pos) + len(false_pos))
-            else: 
-                precision = 0
-
-            if precision+recall != 0 :
-                f1 = 2 * precision * recall / (precision+recall)
-            else:
-                f1 = 0
-
-            # FAlse neg - only in ghida
-            #noa_false_neg = noanalysis_res['strip_v_gnd'].b_only
-            noa_false_neg = noanalysis_res['strip_v_gnd'][2]
-            noa_tot_false_neg += len(noa_false_neg)
-
-            # False Positive
-            #noa_false_pos = noanalysis_res['strip_v_gnd'].a_only
-            noa_false_pos = noanalysis_res['strip_v_gnd'][1]
-            noa_tot_false_pos += len(noa_false_pos)
-
-            # True Positive
-            noa_true_pos = noanalysis_res['strip_v_gnd'][0]
-            noa_tot_true_pos += len(noa_true_pos)
-
-            # Recall 
-            # Precision 
-            # F1
-            noa_recall = len(noa_true_pos) / (len(noa_true_pos) + len(noa_false_neg))
-            noa_precision = len(noa_true_pos) / (len(noa_true_pos) + len(noa_false_pos))
-            noa_f1 = 2 * noa_precision * noa_recall / (noa_precision+noa_recall)
-            if verbose:
-                print(f"Bin {bin_path.name}")
-                print(f"|Analysis.......")
-                print(f"|F1: {f1}")
-                print(f"|Prec: {precision}")
-                print(f"|recall: {recall}")
-                print(f">|No Analysis.......")
-                print(f">|F1: {noa_f1}")
-                print(f">|Prec: {noa_precision}")
-                print(f">|recall: {noa_recall}")
-
-
-
-            data = {
-                'name': bin_path.name,
-                'true_pos' : len(true_pos),
-                'false_neg': len(false_neg),
-                'false_pos': len(false_pos),
-                #'nonstripped_wall_time': res[2][0],
-                'nonstripped_wall_time': int(res['nonstrip_runtime']),
-                #'stripped_wall_time': res[2][1],
-                'stripped_wall_time': int(res['strip_runtime']),
-                #------------------
-                'noanalysis_true_pos' :  len(noa_true_pos),
-                'noanalysis_false_neg':  len(noa_false_neg),
-                'noanalysis_false_pos':  len(noa_false_pos),
-                'noanalysis_nonstripped_wall_time': float(noanalysis_res['nonstrip_runtime']),
-                'noanalysis_stripped_wall_time': float(noanalysis_res['strip_runtime']),
-            }
-
-
-            if not OUT_DIR.exists():
-                OUT_DIR.mkdir()
-
-
-
-            # Cache the result of the run
-            if cache_analysis_info:
-                with open(FILE_DATA, 'w') as f:
-                    json.dump({FILE_DATA.name : data},f)
-
-            cur_data = {}
-            if LOG_FILE.exists():
-                with open(LOG_FILE,'r') as f:
-                    cur_data = json.load(f)
-                    cur_data[bin_path.name] = data
-            with open(LOG_FILE,'w') as f:
-                json.dump(cur_data,f)
-
-        if show_summary:
-
-            # Recall 
-            recall = tot_true_pos / (tot_true_pos + tot_false_neg)
-
-            # Precision 
-            precision = tot_true_pos / (tot_true_pos + tot_false_pos)
-
-            # F1
-            f1 = 2 * precision * recall / (precision+recall)
-
-
-            print(f"Results for {opt_lvl}... {len(bins)} files")
-            print("------------------------------------------")
-            print(f"Total functions: {tot_true_pos+tot_false_neg}")
-            print(f"True Positive: {tot_true_pos}")
-            print(f"False Negative: {tot_false_neg}")
-            print(f"False Positive: {tot_false_pos}")
-            print(f"Precision: {precision}")
-            print(f"Recall: {recall}")
-            print(f"f1: {f1}")
-    return 
+#def timed_bench_all(
+#    output_dir: Annotated[str, typer.Option()] = ".NEW_timed_ghidra_bench/",
+#    cache_analysis_info: Annotated[bool,typer.Option()] = True,
+#    show_summary: Annotated[bool,typer.Option()] = True,
+#    cache_dataset: Annotated[bool,typer.Option()] = True,
+#    verbose: Annotated[bool,typer.Option()] = False,
+#    bin_file_name: Annotated[str,typer.Option()] = "",
+#    ):
+#
+#    using_bin_file = False 
+#    if bin_file_name != "":
+#        using_bin_file = True
+#        with open('XDA_DATASET_SPLITS', 'r') as f:
+#            list_o_bins = [x.strip() for x in f.read().split(',')]
+#
+#        #print(list_o_bins)
+#        print(f"Using {len(list_o_bins)} bins")
+#
+#    opt_lvls = ['O0','O1', 'O2', 'O3','OS', 'OZ']
+#
+#    # The base output dir
+#    OUT_DIR = Path(output_dir)
+#
+#    bins_per_opt_lvl = {}
+#    for opt_lvl in opt_lvls:
+#        bins = []
+#        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#            info_file = parent / 'info.json'
+#            info = {}
+#            try:
+#                with open(info_file, 'r') as f:
+#                    info = json.load(f)
+#            except FileNotFoundError:
+#                print(f"File not found: {info_file}")
+#                continue
+#            except json.JSONDecodeError as e:
+#                print(f"JSON decoding error: {e}")
+#                continue
+#            except Exception as e:
+#                print(f"An error occurred: {e}")
+#                continue
+#
+#            if info['optimization'].upper() == opt_lvl[1]:
+#                #npz_file = parent / "onehot_plus_func_labels.npz"
+#
+#                if using_bin_file:
+#                    bin_name = info['binary_name'].lower()
+#                    if bin_name in list_o_bins:
+#                        bin = parent / info['binary_name']
+#                        bins.append(bin)
+#                        print(f"Bin len {len(bins)}")
+#                        #print(f"skipping bin {bin_name}")
+#                else:
+#                    bin = parent / info['binary_name']
+#                    bins.append(bin)
+#
+#        # Add this list of binary files to the bins_per_opt_lvl with the 
+#        # opt lvl as keey
+#        bins_per_opt_lvl[opt_lvl] = bins
+#
+#
+#    # Need a set of all binaries in the dictionary
+#    testable_binary_names = [x.name for x in set(chain.from_iterable(bins_per_opt_lvl.values()))]
+#    #print(testable_binary_names)
+#
+#    testable_binary_dict = {k:[x for x in v if x.name in testable_binary_names] for k,v in bins_per_opt_lvl.items() }
+#    testable_binary_dict_stringify = {k:[x.name for x in v if x.name in testable_binary_names] for k,v in bins_per_opt_lvl.items() }
+#
+#
+#    if cache_dataset:
+#        cache_dir = Path(".ghidra_cached_dataset")
+#        if not cache_dir.exists():
+#            cache_dir.mkdir()
+#
+#        dataset_file = cache_dir / Path("cached_dataset.json")
+#
+#        with open(dataset_file, 'w') as f:
+#            json.dump(testable_binary_dict_stringify,f)
+#
+#
+#    for opt_lvl in opt_lvls:
+#        # Summary file
+#        LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}.json")
+#
+#        # If the summary file exists append a value to the new ones
+#        count = 0
+#        while LOG_FILE.exists():
+#            LOG_FILE = Path(f"GHIDRA_RUN_{opt_lvl}_rev{count}.json")
+#            count+=1
+#
+#        bins = testable_binary_dict[opt_lvl]
+#
+#        tot_true_pos = 0
+#        tot_false_pos = 0
+#        tot_false_neg = 0
+#        noa_tot_true_pos = 0
+#        noa_tot_false_pos = 0
+#        noa_tot_false_neg = 0
+#        for bin_path in alive_it(bins):
+#
+#            if not bin_path.exists():
+#                continue
+#
+#            if verbose:
+#                print(f"Running ghidra on binary {bin_path.name}")
+#
+#            # The file data
+#            FILE_DATA =  OUT_DIR / f"{bin_path.name}_{opt_lvl}.json"
+#
+#            # Get the results from the bench functions
+#            res =  NEW_ghidra_bench_functions(bin_path)
+#
+#            # Run the noanalysis bench mark
+#            noanalysis_res = NEW_ghidra_bench_functions(bin_path,
+#                                                    no_analysis=True)
+#
+#            # False Negative - Functions in nonstrip that arent in strip
+#            #false_neg = res['strip_v_gnd'].b_only
+#            false_neg = res['nonstrip_v_gnd'][2]
+#            tot_false_neg += len(false_neg)
+#
+#            # False Positive
+#            #false_pos = res['strip_v_gnd'].a_only
+#            false_pos = res['nonstrip_v_gnd'][1]
+#            tot_false_pos += len(false_pos)
+#
+#            # True Positive
+#            true_pos = res['nonstrip_v_gnd'][0]
+#            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+#            print(f"DIFFERENT TURE POS {true_pos}")
+#            tot_true_pos += len(true_pos)
+#
+#            # Recall 
+#            # Precision 
+#            # F1
+#            if len(true_pos) + len(false_neg) != 0 :
+#                recall = len(true_pos) / (len(true_pos) + len(false_neg))
+#            else:
+#                recall = 0
+#
+#            if len(true_pos) + len(false_pos) != 0 :
+#                precision = len(true_pos) / (len(true_pos) + len(false_pos))
+#            else: 
+#                precision = 0
+#
+#            if precision+recall != 0 :
+#                f1 = 2 * precision * recall / (precision+recall)
+#            else:
+#                f1 = 0
+#
+#            # FAlse neg - only in ghida
+#            #noa_false_neg = noanalysis_res['strip_v_gnd'].b_only
+#            noa_false_neg = noanalysis_res['strip_v_gnd'][2]
+#            noa_tot_false_neg += len(noa_false_neg)
+#
+#            # False Positive
+#            #noa_false_pos = noanalysis_res['strip_v_gnd'].a_only
+#            noa_false_pos = noanalysis_res['strip_v_gnd'][1]
+#            noa_tot_false_pos += len(noa_false_pos)
+#
+#            # True Positive
+#            noa_true_pos = noanalysis_res['strip_v_gnd'][0]
+#            noa_tot_true_pos += len(noa_true_pos)
+#
+#            # Recall 
+#            # Precision 
+#            # F1
+#            noa_recall = len(noa_true_pos) / (len(noa_true_pos) + len(noa_false_neg))
+#            noa_precision = len(noa_true_pos) / (len(noa_true_pos) + len(noa_false_pos))
+#            noa_f1 = 2 * noa_precision * noa_recall / (noa_precision+noa_recall)
+#            if verbose:
+#                print(f"Bin {bin_path.name}")
+#                print(f"|Analysis.......")
+#                print(f"|F1: {f1}")
+#                print(f"|Prec: {precision}")
+#                print(f"|recall: {recall}")
+#                print(f">|No Analysis.......")
+#                print(f">|F1: {noa_f1}")
+#                print(f">|Prec: {noa_precision}")
+#                print(f">|recall: {noa_recall}")
+#
+#
+#
+#            data = {
+#                'name': bin_path.name,
+#                'true_pos' : len(true_pos),
+#                'false_neg': len(false_neg),
+#                'false_pos': len(false_pos),
+#                #'nonstripped_wall_time': res[2][0],
+#                'nonstripped_wall_time': int(res['nonstrip_runtime']),
+#                #'stripped_wall_time': res[2][1],
+#                'stripped_wall_time': int(res['strip_runtime']),
+#                #------------------
+#                'noanalysis_true_pos' :  len(noa_true_pos),
+#                'noanalysis_false_neg':  len(noa_false_neg),
+#                'noanalysis_false_pos':  len(noa_false_pos),
+#                'noanalysis_nonstripped_wall_time': float(noanalysis_res['nonstrip_runtime']),
+#                'noanalysis_stripped_wall_time': float(noanalysis_res['strip_runtime']),
+#            }
+#
+#
+#            if not OUT_DIR.exists():
+#                OUT_DIR.mkdir()
+#
+#
+#
+#            # Cache the result of the run
+#            if cache_analysis_info:
+#                with open(FILE_DATA, 'w') as f:
+#                    json.dump({FILE_DATA.name : data},f)
+#
+#            cur_data = {}
+#            if LOG_FILE.exists():
+#                with open(LOG_FILE,'r') as f:
+#                    cur_data = json.load(f)
+#                    cur_data[bin_path.name] = data
+#            with open(LOG_FILE,'w') as f:
+#                json.dump(cur_data,f)
+#
+#        if show_summary:
+#
+#            # Recall 
+#            recall = tot_true_pos / (tot_true_pos + tot_false_neg)
+#
+#            # Precision 
+#            precision = tot_true_pos / (tot_true_pos + tot_false_pos)
+#
+#            # F1
+#            f1 = 2 * precision * recall / (precision+recall)
+#
+#
+#            print(f"Results for {opt_lvl}... {len(bins)} files")
+#            print("------------------------------------------")
+#            print(f"Total functions: {tot_true_pos+tot_false_neg}")
+#            print(f"True Positive: {tot_true_pos}")
+#            print(f"False Negative: {tot_false_neg}")
+#            print(f"False Positive: {tot_false_pos}")
+#            print(f"Precision: {precision}")
+#            print(f"Recall: {recall}")
+#            print(f"f1: {f1}")
+#    return 
 
 @app.command()
 def install_ghidra():
     '''
     Install ghidra
     '''
-
 
     # get the path of this file
     install_script = Path(os.path.abspath(__file__)).parent
@@ -1486,6 +1494,16 @@ def install_ghidra():
     except subprocess.CalledProcessError as e:
         print("Error running command:", e)
         return Path("")
+
+    # Make the ghidra_scripts dir and place the 
+    #  List_Function_and_Entry.py file there
+    scripts = Path("~/ghidra_scripts")
+    if not scripts.exists():
+        scripts.mkdir()
+
+    # Copy the file to the location
+    script_file = install_script.parent / "List_Function_and_Entry.py"
+    shutil.copy2(script_file, scripts)
 
     return
 

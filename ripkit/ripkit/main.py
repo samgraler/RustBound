@@ -20,8 +20,8 @@ from rich.progress import track
 
 console = Console()
 app = typer.Typer()
-app.add_typer(ghid_bench.app, name="ghidra-bench")
-app.add_typer(ida_bench.app, name="ida-bench")
+app.add_typer(ghid_bench.app, name="ghidra")
+app.add_typer(ida_bench.app, name="ida")
 
 
 from ripkit.cargo_picky import (
