@@ -1,4 +1,5 @@
 import typer
+import numpy as np
 from enum import Enum
 import bench_ghidra.eval_ghidra as ghid_bench
 import auto_ida.cli as ida_bench 
@@ -847,6 +848,130 @@ def export_dataset(
         for bin in track(bins, description=f"Copying {len(final_binset)}..."):
             dest_file = out_dir / bin.name
             shutil.copy(bin.resolve(),dest_file.resolve())
+
+    return
+
+
+def get_funcs_with(files, backend):
+
+    num_funcs = {}
+    f_size = {}
+    lief_total = {}
+    total_funcs = 0
+
+    if Path(files).is_dir():
+        files = list(Path(files).glob('*'))
+    else:
+        files = [Path(files)]
+
+    for path in alive_it(files):
+
+        f_size[path] = path.stat().st_size
+
+        if backend == 'lief':
+            functions = get_functions(path)
+            parsed_bin = lief.parse(str(path.resolve()))
+
+            # Get the text session
+            text_section = parsed_bin.get_section(".text")
+
+            # Get the bytes in the .text section
+            text_bytes = text_section.content
+
+            # Get the base address of the loaded binary
+            base_address = parsed_bin.imagebase
+
+            # Save total functions per path 
+            lief_total[path] = len(functions)
+
+            funcs_all = {x.addr : (x.name, x.size) for x in functions}
+
+
+            funcs_txt = {x.addr : (x.name, x.size) for x in 
+                functions if x.addr > base_address + text_section.virtual_address and 
+                                x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+
+            return funcs_all, funcs_txt
+
+        elif backend == 'ghidra':
+            #TODO
+            return []
+        elif backend == 'ida':
+            #TODO
+            print('nop')
+            return []
+        elif backend == 'objdump1':
+            cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort"
+            res = subprocess.run(cmd, shell=True,
+                                universal_newlines=True,
+                                capture_output=True)
+            return res.stdout
+
+        elif backend == 'objdump2':
+            #TODO
+            cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
+            res = subprocess.check_output(cmd, shell=True)
+            total_funcs += int(res)
+        elif backend == 'readelf':
+            #TODO
+            cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
+            res = subprocess.check_output(cmd, shell=True)
+            print(res)
+
+    return
+
+def parse_obj_stdout(inp):
+    addrs = []
+
+    for line in inp.split('\n'):
+        addr = line.split(' ')[0].strip()
+        if addr != '':
+            addrs.append(int(addr, 16))
+    return addrs
+
+@app.command()
+def count_diff(
+
+    inp: Annotated[str, typer.Argument(help="Directory containing files -or- single file")],
+    backend: Annotated[str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")],
+    backend2: Annotated[str, typer.Argument()],
+    ):
+
+
+    # TODO: Very bad func structure right now 
+
+    if backend == "lief":
+        tot_funcs, txt_funcs = get_funcs_with(inp, 'lief')
+        print(txt_funcs)
+
+    if backend2 == "objdump1":
+        # Need to parse this output for functions 
+        stdout_res = get_funcs_with(inp, 'objdump1')
+        func_addrs = np.array(parse_obj_stdout(stdout_res))
+        print(func_addrs)
+
+
+    same = np.intersect1d(list(txt_funcs.keys()), func_addrs)
+
+    lief_only = np.setdiff1d( list(txt_funcs.keys()), func_addrs)
+
+    obj_only = np.setdiff1d( func_addrs, list(txt_funcs.keys()))
+    print(f"Same {len(same)}")
+    print(f"Lief only {len(lief_only)}")
+    print(f"Obj only {len(obj_only)}")
+    print(f"Obj count {len(func_addrs)}")
+    print(f"Obj set count {len(set(func_addrs))}")
+    print(f"lief count {len(list(txt_funcs.keys()))}")
+
+    # Get the functions that are repeated more than once
+    multi_obj = np.setdiff1d(func_addrs, set(func_addrs))
+
+    print(f"The repeated function in obj: {multi_obj}")
+    print(f"The repeated function in obj: {len(multi_obj)}")
+
+
+
+    # Then comparse the parsed output with the functions given by lief
 
     return
 
