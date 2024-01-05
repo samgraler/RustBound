@@ -3,6 +3,7 @@ import shutil
 import time
 import random
 import json
+from typing import List
 from typing_extensions import Annotated
 from fairseq.models.roberta import RobertaModel
 import sys
@@ -38,7 +39,7 @@ class FunctionInfo():
 
 
 
-def get_elf_functions(path:Path, warn_if_stripped: bool = False)->list[FunctionInfo]:
+def get_elf_functions(path:Path, warn_if_stripped: bool = False)->List[FunctionInfo]:
     """
         Get the functions in an ELF file. 
         NOTICE: elffile seems to ignore functions injected by gcc such as 
