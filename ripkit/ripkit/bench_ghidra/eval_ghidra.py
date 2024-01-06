@@ -205,13 +205,13 @@ def find_offset(lief_addrs, ghidra_addrs):
 
     # BUG: This is temp make sure to take it away 
     # BUG Write this to save the bnext to files 
-    with open("GHID_FUNC", 'w') as f:
-        for i, (func, bnext) in enumerate(ghid_addr_bnext):
-            f.write(f"{func} : {bnext}\n")
+    #with open("GHID_FUNC", 'w') as f:
+    #    for i, (func, bnext) in enumerate(ghid_addr_bnext):
+    #        f.write(f"{func} : {bnext}\n")
 
-    with open("LIEF_FUNC", 'w') as f:
-        for i, (func,bnext) in enumerate(lief_addrs):
-            f.write(f"{func} : {bnext}\n")
+    #with open("LIEF_FUNC", 'w') as f:
+    #    for i, (func,bnext) in enumerate(lief_addrs):
+    #        f.write(f"{func} : {bnext}\n")
 
 
 
@@ -342,6 +342,60 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
         bin_path.unlink()
 
     return same, lief_only, ghid_only, runtime
+
+@app.command()
+def read_comparison_file(
+    input : Annotated[str,typer.Argument()],
+    list_fn: Annotated[bool, typer.Option(help="List the false neg's")] = False,
+    list_fp: Annotated[bool, typer.Option(help="List the false pos's")] = False,
+    ):
+    '''
+    Read a single comparison file
+    '''
+
+    # Read the file if it exists
+    if not (file:=Path(input)).exists():
+        return
+    else:
+        with open(file, 'r') as f:
+            data = json.load(f)
+
+    if data == {}:
+        print(f"No data in file {file}")
+        return
+
+
+    # Read in the results 
+    tp = len(data['same'])
+    fp = len(data['ghid_only'])
+    fn = len(data['lief_only'])
+    filesize = data['filesize']
+    runtime = data['runtime']
+
+
+    if list_fn:
+        print("FN | int | hex")
+        for addr in data['lief_only']:
+            print(f"FN | {addr} | {hex(addr)}")
+
+    if list_fp:
+        print("FP | int | hex")
+        for addr in data['ghid_only']:
+            print(f"FP | {addr} | {hex(addr)}")
+
+    print(f"BPS: {filesize / runtime}")
+
+    if tp > 0:
+        prec = tp/(tp+fp)
+        recall = tp/(tp+fn)
+        f1 = 2 * prec* recall / (prec+recall)
+
+        print(f"Prec: {prec}")
+        print(f"Recall: {recall}")
+        print(f"F1 : {f1}")
+    else:
+        print(f"Analyzed tp is 0")
+    return
 
 @app.command()
 def read_comparison_dir(
@@ -480,7 +534,7 @@ def cli_test(
         flags = []
 
     # Run the ghidra compare
-    same, ghid_only, lief_only, runtime = test_lief_v_ghid(bin_path,flags, strip_file)
+    same, lief_only, ghid_only, runtime = test_lief_v_ghid(bin_path,flags, strip_file)
 
     if save_results is not None:
         save_comparison(bin_path, strip_file, same, ghid_only, lief_only, noanalysis, Path(save_results), runtime)
@@ -542,7 +596,7 @@ def batch_test_ghidra(
             flags = []
 
         # Run the ghidra compare
-        same, ghid_only, lief_only, runtime = test_lief_v_ghid(bin, 
+        same, lief_only, ghid_only, runtime = test_lief_v_ghid(bin, 
                                             flags, strip_file)
         tp += len(same)
         fn += len(lief_only)
