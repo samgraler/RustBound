@@ -32,6 +32,46 @@ from .analyzer_types import FunctionInfo, binaryFileExecSectionOnly, \
 from alive_progress import alive_bar
 
 
+def disasm_at(path: Path, start_addr: int, num_bytes: int):
+    '''
+    Disasemble start at the given address 
+    '''
+
+    # Get the generator for the disasm section
+    res = lief_disassemble_text_section(path)
+
+
+    # NOTICE:
+    # -res is a list of CsInsn objects... which are a bit confusing
+    #  - Important values in CsInsn are 
+    #      [id, addr, mnemonic, op_str, size, bytes]
+    #  - The bytes value are also odd... it is a byteArray
+    #  which looks like byteArray(b'\xo...\'), so a weird wrapper
+    #  around a byte object
+
+    # See the below for how the bytes_string is created, this does that 
+    # but finds the longest one so I can format the output string nicely
+    max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+
+    # Format each byte in the res nicely
+    for thing in res:
+
+        if int(thing.address) < start_addr:
+            continue
+        if int(thing.address) > start_addr + num_bytes:
+            return
+
+        byte_ar = thing.bytes
+        bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
+        print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
+
+    return
+    
+
+
+    return
+
+
 def lief_get_file_type(path: Path):
     bin = lief.parse(str(path.resolve()))
     return bin.header.machine_type

@@ -18,6 +18,7 @@ from .binary_analyzer import (
     generate_minimal_unlabeled_features,
     POLARS_generate_minimal_unlabeled_features,
     get_functions,
+    disasm_at,
 )
 
 from .ripbin_deterministic_db import (

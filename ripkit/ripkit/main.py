@@ -55,6 +55,7 @@ from ripkit.ripbin import (
     Compiler,
     ProgLang,
     RustcOptimization,
+    disasm_at,
 )
 
 
@@ -199,6 +200,23 @@ def init():
     and register files
     '''
     init_crates_io()
+    return
+
+
+@app.command()
+def disasm(
+        file: Annotated[str, typer.Argument(help="Input file")],
+        addr: Annotated[str, typer.Argument(help="Address to start at in hex")],
+        num_bytes: Annotated[int, typer.Argument(help="Number of bytes to disassameble")],
+    ):
+
+    file_path = Path(file)
+
+    if not file_path.exists():
+        return
+
+    disasm_at(file_path, int(addr,16), num_bytes)
+
     return
 
 @app.command()
