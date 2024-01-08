@@ -2,6 +2,7 @@ import typer
 import numpy as np
 from enum import Enum
 import bench_ghidra.eval_ghidra as ghid_bench
+from typing import List
 import auto_ida.cli as ida_bench 
 import shutil
 from dataclasses import dataclass
@@ -1257,6 +1258,113 @@ def build_analyze_all(
 
     print(f"Total build success: {success}")
 
+
+
+
+def get_text_functions(bin_path: Path):
+    '''
+    '''
+    bin = lief.parse(str(bin_path.resolve()))
+
+    text_section = bin.get_section(".text")
+    text_bytes = text_section.content
+
+    # Get the bytes in the .text section
+    text_bytes = text_section.content
+
+    # Get the base address of the loaded binary
+    base_address = bin.imagebase
+
+    functions = get_functions(bin_path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+    func_addrs = []
+    func_names = []
+
+    # This enumerate the .text byte and sees which ones are functions
+    for i, _ in enumerate(text_bytes):
+        address = base_address + text_section.virtual_address + i
+        if address in func_start_addrs.keys():
+            func_addrs.append(address)
+            func_names.append(func_start_addrs[address][0])
+
+    # Return the addrs and names 
+    func_addrs = np.array(func_addrs)
+    return FoundFunctions(func_addrs, func_names)
+
+
+@dataclass
+class FoundFunctions():
+    addresses: np.ndarray
+    names: List[str]
+
+
+@dataclass
+class dataset_stat:
+    files: int
+    file_size: int
+    stripped_size: int 
+    text_section_size: int 
+    functions: int 
+    text_section_functions: int 
+
+
+def gen_strip_file(bin_path:Path):
+    '''
+    Strip the passed file and return the path of the 
+    stripped file
+    '''
+
+    # Copy the bin and strip it 
+    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
+    shutil.copy(bin_path, Path(strip_bin))
+
+    try:
+        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
+    except subprocess.CalledProcessError as e:
+        print("Error running command:", e)
+        return Path("")
+
+    return strip_bin
+
+
+
+@app.command()
+def dataset_stats(
+    dataset: Annotated[str,typer.Argument()],
+    ):
+    '''
+    Get info on dataset. Expects a dataset to be all binaries, and all nonstripped
+    '''
+
+    bins = list(Path(dataset).glob('*'))
+
+    stats = dataset_stat(0,0,0,0,0,0)
+
+    # Get the size of the stripped bins 
+    for bin in alive_it(bins):
+        stats.files += 1
+        stats.file_size += bin.stat().st_size
+        stats.functions += len(get_functions(bin))
+        stats.text_section_functions += len(get_text_functions(bin).addresses)
+
+        stripped_bin = gen_strip_file(bin)
+        stats.stripped_size += stripped_bin.stat().st_size
+        stripped_bin.unlink()
+
+        bin = lief.parse(str(bin.resolve()))
+
+        text_section = bin.get_section(".text")
+        text_bytes = text_section.content
+
+        # Get the bytes in the .text section
+        text_bytes = text_section.content
+        stats.text_section_size += len(text_bytes)
+
+
+    print(stats)
+
+    return
 
 
 
