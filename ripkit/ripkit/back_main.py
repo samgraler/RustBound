@@ -1,11 +1,17 @@
 import typer
+import numpy as np
+from enum import Enum
+import bench_ghidra.eval_ghidra as ghid_bench
+import auto_ida.cli as ida_bench 
 import shutil
 from dataclasses import dataclass
 from itertools import chain
+import subprocess
 import lief
 import math
 import json
 import pandas as pd
+from typing import List
 from typing_extensions import Annotated
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
@@ -16,10 +22,13 @@ from rich.progress import track
 
 console = Console()
 app = typer.Typer()
+app.add_typer(ghid_bench.app, name="ghidra")
+app.add_typer(ida_bench.app, name="ida")
 
 
 from ripkit.cargo_picky import (
     gen_cargo_build_cmd,
+    gen_cross_build_cmd,
     get_target_productions,
     is_executable,
     init_crates_io,
@@ -90,8 +99,12 @@ def build_analyze_crate(crate, opt, target, filetype,
     # Need this to get the build command 
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
-    # Need the build command for the bundle info 
-    build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
+    # Need the build command for the bundle info, this is NOT used 
+    # to actually exectue a build command
+    if use_cargo:
+        build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
+    else: 
+        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
 
 
     # Get files of interest from the crate at the target <target>
@@ -135,57 +148,6 @@ def build_analyze_crate(crate, opt, target, filetype,
         print(f"Exception {e} in crate {crate}")
 
     return 0
-
-
-# Load the binary and 
-def gen_data_raw_func_bound(path: Path, output: Path):
-    #TODO: Use lief to get the .text section of the binary and but here 
-    #      (... or is it use lief to get every byte from the file and put here?...)
-
-    functions = get_functions(path)
-
-    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
-
-    func_end_addrs = {} 
-    for start, info in func_start_addrs.items():
-        # NOTE: THIS IS IMPORTANT
-        # Ignoring functions that are of zero length
-        if info[1] > 0:
-            func_end_addrs[start+info[1]] = info[0]
-
-
-    parsed_bin = lief.parse(str(path.resolve()))
-    text_section = parsed_bin.get_section(".text")
-
-    # Get the bytes in the .text section
-    text_bytes = text_section.content
-
-    # Get the base address of the loaded binary
-    base_address = parsed_bin.imagebase
-
-    with open(output, 'w') as out:
-        for i, byte in enumerate(text_bytes):
-
-            # Starting at the text section, the address of each byte is 
-            # the base_address + the text_section's virtual address 
-            # plus the number of bytes we've gone over 
-            address = base_address + text_section.virtual_address + i
-            func_start = True if address in func_start_addrs.keys() else False
-            func_end = True if address in func_end_addrs.keys() else False
-            func_middle = True if not func_start and not func_end else False
-
-            if func_start:
-                lbl = 'F'
-            elif func_end:
-                lbl= 'R'
-            else:
-                lbl = '-'
-            line = f"{str(hex(address))[2:]} {lbl}"
-            #print(line)
-            out.write(line+'\n')
-
-    #print("WARNING THIS ONLY HAS THE .TEXT section")
-    return
 
 
 
@@ -232,33 +194,6 @@ def get_all_bins()->dict:
     return bin_by_opt
 
 @app.command()
-def list_functions(
-        binary: Annotated[str, typer.Argument()],
-        count: Annotated[bool, typer.Option()] = False,
-    ):
-    '''
-    Print the list of function that lief detects
-    '''
-
-    path = Path(binary)
-    functions = get_functions(path)
-
-    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
-
-    # Fancy line to get the longest addr and round it up to 2 bytes 
-    max_len = math.ceil(max(len(str(x)) for x in func_start_addrs.keys()) / 2) * 2
-
-    for addr, info in func_start_addrs.items():
-        #print(f"0x{str(int(hex(addr),16)).zfill(max_len)}: {info[0]}")
-        #print(f"{str(hex(addr)).zfill(max_len)}: {info[0]}")
-        print(f"{hex(addr)}: {info[0]}")
-    if count:
-        print(f"{len(func_start_addrs.keys())} functions")
-
-    return
-    
-
-@app.command()
 def init():
     '''
     Initialize ripkit with rust data base,
@@ -277,9 +212,11 @@ def is_crate_exe(
 
 @app.command()
 def cargo_clone(
-        crate: Annotated[str, typer.Argument()]):
+        crate: Annotated[str, typer.Argument()],
+        update: Annotated[bool, typer.Option(
+                    help="Update the crate if its already cloned")] = False):
 
-    clone_crate(crate)
+    clone_crate(crate, exist_ok=update)
 
     return
 
@@ -348,14 +285,22 @@ def clone_many_exe(
             if cloned_count >= number:
                 break
 
+def get_enum_type(enum, input_string) -> Enum:
+    try:
+        return enum(input_string)
+    except Exception:
+        raise ValueError(f"No matching enum type for the string '{input_string}'")
+
 
 @app.command()
 def build(
     crate: Annotated[str, typer.Argument(help="crate name")],
     opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    bit: Annotated[str, typer.Argument(help="32 or 64")],
-    filetype: Annotated[str, typer.Argument(help="pe or elf")],
+    target: Annotated[str, typer.Argument(help="crate target")],
+    #bit: Annotated[str, typer.Argument(help="32 or 64")],
+    #filetype: Annotated[str, typer.Argument(help="pe or elf")],
     strip: Annotated[bool, typer.Option()] = False,
+    verbose: Annotated[bool, typer.Option()] = False,
     ):
     '''
     Build a crate for a specific target
@@ -374,25 +319,28 @@ def build(
         print(e)
         return
 
-    if bit == "64":
-        if filetype == "elf":
-            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
-        else:
-            print("UNknown filetype")
-            return
-    elif bit == "32":
-        if filetype == "elf":
-            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-        elif filetype == "pe":
-            target = RustcTarget.I686_PC_WINDOWS_GNU 
-        else:
-            print("UNknown filetype")
-            return
-    else:
-        print("UNknown bit")
-        return
+    # Match the target to its enum
+    target_enum = get_enum_type(RustcTarget, target)
+
+    #if bit == "64":
+    #    if filetype == "elf":
+    #        target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
+    #    elif filetype == "pe":
+    #        target = RustcTarget.X86_64_PC_WINDOWS_GNU 
+    #    else:
+    #        print("UNknown filetype")
+    #        return
+    #elif bit == "32":
+    #    if filetype == "elf":
+    #        target = RustcTarget.I686_UNKNOWN_LINUX_GNU
+    #    elif filetype == "pe":
+    #        target = RustcTarget.I686_PC_WINDOWS_GNU 
+    #    else:
+    #        print("UNknown filetype")
+    #        return
+    #else:
+    #    print("UNknown bit")
+    #    return
 
     if not strip:
         strip_lvl = RustcStripFlags.NOSTRIP
@@ -401,11 +349,11 @@ def build(
         strip_lvl = RustcStripFlags.SYM_TABLE
 
 
-    if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-        build_crate(crate, opt, target, strip_lvl,
-                    use_cargo=True, debug=True)
+    if target_enum == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
+        build_crate(crate, opt, target_enum, strip_lvl,
+                    use_cargo=True, debug=verbose)
     else:
-        build_crate(crate, opt, target, strip_lvl,debug=True)
+        build_crate(crate, opt, target_enum, strip_lvl,use_cargo=False, debug=verbose)
 
     print(f"Crate {crate} built")
     return
@@ -577,13 +525,21 @@ def num_funcs(path:Path):
 @app.command()
 def stats():
     '''
-    Print stats about the rippe binaries
+    Print stats about the ripped binaries
     '''
 
     # Dict of info
     stats = { }
 
-    for parent in alive_it(Path("/home/ryan/.ripbin/ripped_bins/").iterdir()):
+    ripbin_dir = Path("~/.ripbin/ripped_bins").expanduser().resolve()
+    if not ripbin_dir.exists():
+        print(f"Ripbin dir does not exist at {ripbin_dir}")
+        return
+
+    riplist = list(ripbin_dir.iterdir())
+
+    #for parent in alive_it(Path("/home/ryan/.ripbin/ripped_bins/").iterdir()):
+    for parent in alive_it(riplist):
         info_file = parent / 'info.json'
         info = {}
         try:
@@ -617,7 +573,6 @@ def stats():
             print(f"Unkown | {opt}")
         print(f"    {data.files} files")
         print(f"    {data.size} bytes")
-        print(f"    {data.funcs} functions")
     return
 
 @app.command()
@@ -897,11 +852,136 @@ def export_dataset(
 
     return
 
+
+def get_funcs_with(files, backend):
+
+    num_funcs = {}
+    f_size = {}
+    lief_total = {}
+    total_funcs = 0
+
+    if Path(files).is_dir():
+        files = list(Path(files).glob('*'))
+    else:
+        files = [Path(files)]
+
+    for path in alive_it(files):
+
+        f_size[path] = path.stat().st_size
+
+        if backend == 'lief':
+            functions = get_functions(path)
+            parsed_bin = lief.parse(str(path.resolve()))
+
+            # Get the text session
+            text_section = parsed_bin.get_section(".text")
+
+            # Get the bytes in the .text section
+            text_bytes = text_section.content
+
+            # Get the base address of the loaded binary
+            base_address = parsed_bin.imagebase
+
+            # Save total functions per path 
+            lief_total[path] = len(functions)
+
+            funcs_all = {x.addr : (x.name, x.size) for x in functions}
+
+
+            funcs_txt = {x.addr : (x.name, x.size) for x in 
+                functions if x.addr > base_address + text_section.virtual_address and 
+                                x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+
+            return funcs_all, funcs_txt
+
+        elif backend == 'ghidra':
+            #TODO
+            return []
+        elif backend == 'ida':
+            #TODO
+            print('nop')
+            return []
+        elif backend == 'objdump1':
+            cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort"
+            res = subprocess.run(cmd, shell=True,
+                                universal_newlines=True,
+                                capture_output=True)
+            return res.stdout
+
+        elif backend == 'objdump2':
+            #TODO
+            cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
+            res = subprocess.check_output(cmd, shell=True)
+            total_funcs += int(res)
+        elif backend == 'readelf':
+            #TODO
+            cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
+            res = subprocess.check_output(cmd, shell=True)
+            print(res)
+
+    return
+
+def parse_obj_stdout(inp):
+    addrs = []
+
+    for line in inp.split('\n'):
+        addr = line.split(' ')[0].strip()
+        if addr != '':
+            addrs.append(int(addr, 16))
+    return addrs
+
+@app.command()
+def count_diff(
+
+    inp: Annotated[str, typer.Argument(help="Directory containing files -or- single file")],
+    backend: Annotated[str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")],
+    backend2: Annotated[str, typer.Argument()],
+    ):
+
+
+    # TODO: Very bad func structure right now 
+
+    if backend == "lief":
+        tot_funcs, txt_funcs = get_funcs_with(inp, 'lief')
+        print(txt_funcs)
+
+    if backend2 == "objdump1":
+        # Need to parse this output for functions 
+        stdout_res = get_funcs_with(inp, 'objdump1')
+        func_addrs = np.array(parse_obj_stdout(stdout_res))
+        print(func_addrs)
+
+
+    same = np.intersect1d(list(txt_funcs.keys()), func_addrs)
+
+    lief_only = np.setdiff1d( list(txt_funcs.keys()), func_addrs)
+
+    obj_only = np.setdiff1d( func_addrs, list(txt_funcs.keys()))
+    print(f"Same {len(same)}")
+    print(f"Lief only {len(lief_only)}")
+    print(f"Obj only {len(obj_only)}")
+    print(f"Obj count {len(func_addrs)}")
+    print(f"Obj set count {len(set(func_addrs))}")
+    print(f"lief count {len(list(txt_funcs.keys()))}")
+
+    # Get the functions that are repeated more than once
+    multi_obj = np.setdiff1d(func_addrs, set(func_addrs))
+
+    print(f"The repeated function in obj: {multi_obj}")
+    print(f"The repeated function in obj: {len(multi_obj)}")
+
+
+
+    # Then comparse the parsed output with the functions given by lief
+
+    return
+
+
 @app.command()
 def count_funcs(
-    inp_dir: Annotated[str, typer.Argument(help="Directory containing files")],
-    ignore_funcs: Annotated[bool, typer.Argument()],
-    #backend: Annotated[str, typer.Argument(help="lief, ghidra, or ida")],
+    inp: Annotated[str, typer.Argument(help="Directory containing files -or- single file")],
+    backend: Annotated[str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")]='lief',
+    list_functions: Annotated[bool, typer.Option(help="List all the functions in the given files")]=False,
     ):
     '''
     Count the functions in the .text section. Files must be non-stripped
@@ -909,33 +989,111 @@ def count_funcs(
 
     num_funcs = {}
     f_size = {}
-    for path in Path(inp_dir).glob('*'):
+    lief_total = {}
+
+    # Check that the backend is good 
+    if backend not in ["lief", "ghidra", "ida", "objdump1", "objdump2", "readelf"]:
+        print(f"The backend is not in {backend}")
+        return
+
+    if Path(inp).is_dir():
+        files = list(Path(inp).glob('*'))
+    else:
+        files = [Path(inp)]
+
+
+    total_funcs = 0 
+    if backend == 'lief':
+        print("Using Lief for function boundary")
+
+        res = """
+        NOTICE: elffile seems to ignore functions injected by gcc such as 
+        "register_tm...", "deregister_tm...", 
+        Therefore those names will be included in the list, but will have 
+        a size of 0 
+            elf = ELFFile(f)
+
+            # Get the symbol table
+            symbol_table = elf.get_section_by_name('.symtab')
+
+            # Create a list of functionInfo objects... symbol_table will give a 
+            # list of symbols, grab the function sybols and get there name, 
+            # their 'st_value' which is start addr and size 
+            functionInfo = [FunctionInfo(x.name, x['st_value'], f"0x{x['st_value']:x}",x['st_size']) 
+                for x in symbol_table.iter_symbols() if x['st_info']['type'] == 'STT_FUNC']
+
+        """
+        print(res)
+    elif backend == 'ida':
+        print('nop')
+    elif backend == 'objdump1':
+        cmd = "objdump -t -f <FILE_PATH> | grep 'F .text' | sort | wc -l"
+        print(f"The command being used is {cmd}")
+    elif backend == 'objdump2':
+        cmd = "objdump -d <FILE_PATH> | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
+        print(f"The command being used is {cmd}")
+    elif backend == 'readelf':
+        cmd = "readelf -Ws <FILE_PATH> | grep FUNC | wc -l"
+        print(f"The command being used is {cmd}")
+
+    for path in alive_it(files):
 
         f_size[path] = path.stat().st_size
-        if ignore_funcs:
-            continue
 
-        functions = get_functions(path)
-        parsed_bin = lief.parse(str(path.resolve()))
+        if backend == 'lief':
+            functions = get_functions(path)
+            parsed_bin = lief.parse(str(path.resolve()))
 
-        # Get the text session
-        text_section = parsed_bin.get_section(".text")
+            # Get the text session
+            text_section = parsed_bin.get_section(".text")
 
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
+            # Get the bytes in the .text section
+            text_bytes = text_section.content
 
-        # Get the base address of the loaded binary
-        base_address = parsed_bin.imagebase
+            # Get the base address of the loaded binary
+            base_address = parsed_bin.imagebase
 
-        func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
-                            if x.addr > base_address + text_section.virtual_address and 
-                            x.addr < base_address + text_section.virtual_address + len(text_bytes) }
+            lief_total[path] = len(functions)
+            func_start_addrs = {x.addr : (x.name, x.size) for x in functions 
+                                if x.addr > base_address + text_section.virtual_address and 
+                                x.addr < base_address + text_section.virtual_address + len(text_bytes) }
 
-        num_funcs[path] = len(func_start_addrs.keys())
+            num_funcs[path] = len(func_start_addrs.keys())
+            if list_functions:
+                for addr, (name,size) in func_start_addrs.items():
+                    print(f'{addr} : {name}')
 
-    if not ignore_funcs: print(f"Total funcs: {sum(num_funcs.values())}")
-    print(f"Total files: {len(num_funcs.keys())}")
-    print(f"Total file size: {sum(f_size.values())}")
+        elif backend == 'ghidra':
+            #TODO
+            print('nop')
+        elif backend == 'ida':
+            #TODO
+            print('nop')
+        elif backend == 'objdump1':
+            #TODO
+            cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort | wc -l"
+            res = subprocess.check_output(cmd, shell=True)
+            total_funcs += int(res)
+        elif backend == 'objdump2':
+            #TODO
+            cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'" 
+            res = subprocess.check_output(cmd, shell=True)
+            total_funcs += int(res)
+        elif backend == 'readelf':
+            #TODO
+            cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
+            res = subprocess.check_output(cmd, shell=True)
+            print(res)
+
+
+
+    if backend == 'lief':
+        print(f"lief Total funcs: {sum(lief_total.values())}")
+        print(f"Total funcs: {sum(num_funcs.values())}")
+        print(f"Total file size: {sum(f_size.values())}")
+    else:
+        print(f"Total functions: {total_funcs}")
+        print(f"Total files: {len(files)}")
 
     return
 
@@ -943,8 +1101,9 @@ def count_funcs(
 @app.command()
 def build_analyze_all(
     opt_lvl: Annotated[str, typer.Argument()],
-    bit: Annotated[int, typer.Argument()],
+    #bit: Annotated[int, typer.Argument()],
     filetype: Annotated[str, typer.Argument()],
+    target: Annotated[str, typer.Argument(help="crate target")],
     stop_on_fail: Annotated[bool,typer.Option()]=False,
     force_build_all: Annotated[bool,typer.Option()]=False,
     build_arm : Annotated[bool,typer.Option()]=False,
@@ -961,36 +1120,40 @@ def build_analyze_all(
         print(e)
         return
 
+    target_enum = get_enum_type(RustcTarget, target)
 
-    if not build_arm:
-        if bit == 64:
-            if filetype == "elf":
-                target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-            elif filetype == "pe":
-                target = RustcTarget.X86_64_PC_WINDOWS_GNU 
-            else:
-                print("Invlaid filetype")
-                return
-        elif bit == 32:
-            if filetype == "elf":
-                target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-            elif filetype == "pe":
-                target = RustcTarget.I686_PC_WINDOWS_GNU 
-            else:
-                print("Invlaid filetype")
-                return
-        else:
-            print(f"Invlaid bit lvl {bit}")
-            return
-    else:
-        if bit == 64:
-            target = RustcTarget.AARCH64_UNKNOWN_LINUX_GNU 
+    #if not build_arm:
+    #    if bit == 64:
+    #        if filetype == "elf":
+    #            target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
+    #        elif filetype == "pe":
+    #            target = RustcTarget.X86_64_PC_WINDOWS_GNU 
+    #        else:
+    #            print("Invlaid filetype")
+    #            return
+    #    elif bit == 32:
+    #        if filetype == "elf":
+    #            target = RustcTarget.I686_UNKNOWN_LINUX_GNU
+    #        elif filetype == "pe":
+    #            target = RustcTarget.I686_PC_WINDOWS_GNU 
+    #        else:
+    #            print("Invlaid filetype")
+    #            return
+    #    else:
+    #        print(f"Invlaid bit lvl {bit}")
+    #        return
+    #else:
+    #    if bit == 64:
+    #        target = RustcTarget.AARCH64_UNKNOWN_LINUX_GNU 
 
-    # List of crate current installed
-    installed_crates = [x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
+    # List of crate current installed that can be built
+    crates_to_build = [x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
     ]
 
 
+    # If we don't have to build all the crates, find the crates that 
+    # are already built with the specified optimization and arch
+    # an dremovet that from the list of installed crates
     if not force_build_all:
 
         for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
@@ -1009,15 +1172,16 @@ def build_analyze_all(
                 print(f"An error occurred: {e}")
                 continue
 
-            if info['optimization'].upper() in opt_lvl:
+            if info['optimization'].upper() in opt_lvl and \
+                info['target'].upper() in target_enum.value.upper():
                 # Remove this file from the installed crates list 
-                if (x:=info['binary_name']) in installed_crates:
-                    installed_crates.remove(x)
+                if (x:=info['binary_name']) in crates_to_build:
+                    crates_to_build.remove(x)
 
     # Any crates that are already built with the same target don't rebuild or analyze
 
     # Need to get all the analysis for the given optimization and target... 
-    crates_with_no_interest = Path(f"~/.crates_io/uninteresting_crates_cache_{target.value}").expanduser()
+    crates_with_no_interest = Path(f"~/.crates_io/uninteresting_crates_cache_{target_enum.value}").expanduser()
 
     boring_crates = []
     # If the file doesn't exist throw in the empty list
@@ -1026,19 +1190,25 @@ def build_analyze_all(
         with open(crates_with_no_interest, 'w') as f:
             json.dump({'names' : boring_crates},f)
 
+    # Add to the boring crates that aren't being built if we are 
+    # not forcing the build of all crates
     if not force_build_all:
         # If the file does exist read it, ex
         with open(crates_with_no_interest, 'r') as f:
             boring_crates.extend(json.load(f)['names'])
 
-    for x in boring_crates:
-        if x in installed_crates:
-            installed_crates.remove(x)
+    # Dont build any crate that have been found to have no executable
+    crates_to_build = [x for x in crates_to_build if 
+                        x not in boring_crates]
+
+    #for x in boring_crates:
+    #    if x in crates_to_build:
+    #        crates_to_build.remove(x)
 
     success = 0
 
     # Build and analyze each crate
-    for crate in alive_it(installed_crates):
+    for crate in alive_it(crates_to_build):
         #TODO: the following conditional is here because when building for 
         #       x86_64 linux I know that cargo will work, and I know 
         #       cargo's toolchain version 
@@ -1046,7 +1216,7 @@ def build_analyze_all(
         if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
             try:
                 res = build_analyze_crate(crate, opt, 
-                            target, filetype,
+                            target_enum, filetype,
                             RustcStripFlags.NOSTRIP,
                             use_cargo=True)
             except CrateBuildException:
@@ -1054,7 +1224,7 @@ def build_analyze_all(
         else:
             try:
                 res = build_analyze_crate(crate, opt, 
-                            target, filetype,
+                            target_enum, filetype,
                             RustcStripFlags.NOSTRIP, use_cargo=False)
             except CrateBuildException:
                 print(f"Failed to build crate {crate}")
@@ -1071,6 +1241,110 @@ def build_analyze_all(
     print(f"Total build success: {success}")
 
 
+def get_text_functions(bin_path: Path):
+    '''
+    '''
+    bin = lief.parse(str(bin_path.resolve()))
+
+    text_section = bin.get_section(".text")
+    text_bytes = text_section.content
+
+    # Get the bytes in the .text section
+    text_bytes = text_section.content
+
+    # Get the base address of the loaded binary
+    base_address = bin.imagebase
+
+    functions = get_functions(bin_path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+    func_addrs = []
+    func_names = []
+
+    # This enumerate the .text byte and sees which ones are functions
+    for i, _ in enumerate(text_bytes):
+        address = base_address + text_section.virtual_address + i
+        if address in func_start_addrs.keys():
+            func_addrs.append(address)
+            func_names.append(func_start_addrs[address][0])
+
+    # Return the addrs and names 
+    func_addrs = np.array(func_addrs)
+    return FoundFunctions(func_addrs, func_names)
+
+
+@dataclass
+class FoundFunctions():
+    addresses: np.ndarray
+    names: List[str]
+
+
+@dataclass
+class dataset_stat:
+    files: int
+    file_size: int
+    stripped_size: int 
+    text_section_size: int 
+    functions: int 
+    text_section_functions: int 
+
+
+def gen_strip_file(bin_path:Path):
+    '''
+    Strip the passed file and return the path of the 
+    stripped file
+    '''
+
+    # Copy the bin and strip it 
+    strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
+    shutil.copy(bin_path, Path(strip_bin))
+
+    try:
+        _ = subprocess.check_output(['strip',f'{strip_bin.resolve()}'])
+    except subprocess.CalledProcessError as e:
+        print("Error running command:", e)
+        return Path("")
+
+    return strip_bin
+
+
+
+@app.command()
+def dataset_stats(
+    dataset: Annotated[str,typer.Argument()],
+    ):
+    '''
+    Get info on dataset. Expects a dataset to be all binaries, and all nonstripped
+    '''
+
+    bins = list(Path(dataset).glob('*'))
+
+    stats = dataset_stat(0,0,0,0,0,0)
+
+    # Get the size of the stripped bins 
+    for bin in alive_it(bins):
+        stats.files += 1
+        stats.file_size += bin.stat().st_size
+        stats.functions += len(get_functions(bin))
+        stats.text_section_functions += len(get_text_functions(bin).addresses)
+
+        stripped_bin = gen_strip_file(bin)
+        stats.stripped_size += stripped_bin.stat().st_size
+        stripped_bin.unlink()
+
+        bin = lief.parse(str(bin.resolve()))
+
+        text_section = bin.get_section(".text")
+        text_bytes = text_section.content
+
+        # Get the bytes in the .text section
+        text_bytes = text_section.content
+        stats.text_section_size += len(text_bytes)
+
+
+    print(stats)
+
+    return
 
 
 

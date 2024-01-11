@@ -1,5 +1,6 @@
 from pathlib import Path 
 import shutil
+import subprocess
 import time
 import random
 import json
@@ -660,6 +661,26 @@ def read_log(
     print(res)
     print(f" The total runtime: {tot_runtime} seconds")
     print(f"The BPS: {res['stripped_size'] / tot_runtime}")
+    #print(f"
+
+
+    # Recall = # Correct Pos lbls /  # Ground Trurth Pos lbls
+    # Recall = tp / (tp+fn) 
+    recall = res['tp'] / (res['tp']+res['fn'])
+
+    # Prec = #pos_lbl / #
+    # Prec = tp / (tp+fp)
+    prec = res['tp'] / ( res['tp'] + res['fp'])
+
+    # F1 
+    f1 = (2*prec*recall)/(prec+recall)
+
+    print(f"Prec: {prec}")
+    print(f"Recall: {recall}")
+    print(f"F1: {f1}")
+
+
+
     return
 
 

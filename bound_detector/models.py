@@ -16,7 +16,6 @@ class recreatedModel(nn.Module):
         #                  batch_first=True, bidirectional=True)
         self.fc = nn.Linear(hidden_size*2, 1)
         self.sigmoid = nn.Sigmoid()
-        self.softmax = nn.Softmax()
         self.relu = nn.ReLU()
 
     def forward(self, x)->torch.Tensor:
@@ -24,15 +23,11 @@ class recreatedModel(nn.Module):
             Forward method
         '''
 
-        param_1 = self.num_layers * 2 
-        param_2 = x.size(0)
-        #param_2 = x.shape[0]
-        param_3 = self.hidden_size
         h0 = torch.zeros(self.num_layers * 2, x.size(0), 
                          self.hidden_size).to(x.device)
-        #h0 = torch.zeros(param_1, param_2, 
-        #                 param_3).to(x.device)
+
         out, _ = self.rnn(x, h0)
+
         out = self.fc(out)
         out = out.squeeze(dim=2)
         out = torch.nan_to_num(self.sigmoid(out))

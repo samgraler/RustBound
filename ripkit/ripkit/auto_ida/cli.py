@@ -66,9 +66,6 @@ def get_lief_functions(bin_path: Path):
             func_addrs.append(address)
             func_names.append(func_start_addrs[address][0])
 
-    # Get the functions from the bin 
-    functions = get_functions(bin_path)
-
     # Return the addrs and names 
     func_addrs = np.array(func_addrs)
     return FoundFunctions(func_addrs, func_names)
