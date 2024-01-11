@@ -19,6 +19,9 @@ from .binary_analyzer import (
     POLARS_generate_minimal_unlabeled_features,
     get_functions,
     disasm_at,
+    disasm_with,
+    lief_disassemble_text_section,
+    disasm_bytes,
 )
 
 from .ripbin_deterministic_db import (

@@ -5,6 +5,8 @@ storage of the file and it's analysis
 import numpy as np
 import polars as pl
 
+from typing import List
+
 import sys
 from pathlib import Path
 import magic
@@ -32,13 +34,42 @@ from .analyzer_types import FunctionInfo, binaryFileExecSectionOnly, \
 from alive_progress import alive_bar
 
 
-def disasm_at(path: Path, start_addr: int, num_bytes: int):
+def disasm_with(path: Path, start_addr: int, num_bytes: int, res ) -> List[str]:
+    '''
+    Disasemble start at the given address 
+    '''
+
+    # but finds the longest one so I can format the output string nicely
+    max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+
+    disasm = []
+
+    # Format each byte in the res nicely
+    for thing in [x for x in res if x.address >= start_addr and x.address <= start_addr + num_bytes]:
+
+        #if int(thing.address) < start_addr:
+        #    continue
+        #if int(thing.address) > start_addr + num_bytes:
+        #    return disasm
+
+        byte_ar = thing.bytes
+        bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
+        res_str = f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}"
+        disasm.append(res_str)
+
+    return disasm
+
+
+
+
+def disasm_at(path: Path, start_addr: int, num_bytes: int) -> List[str]:
     '''
     Disasemble start at the given address 
     '''
 
     # Get the generator for the disasm section
     res = lief_disassemble_text_section(path)
+    print(f"Got res")
 
 
     # NOTICE:
@@ -53,23 +84,22 @@ def disasm_at(path: Path, start_addr: int, num_bytes: int):
     # but finds the longest one so I can format the output string nicely
     max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
 
-    # Format each byte in the res nicely
-    for thing in res:
+    disasm = []
 
-        if int(thing.address) < start_addr:
-            continue
-        if int(thing.address) > start_addr + num_bytes:
-            return
+    # Format each byte in the res nicely
+    for thing in [x for x in res if x.address >= start_addr and x.address <= start_addr + num_bytes]:
+
+        #if int(thing.address) < start_addr:
+        #    continue
+        #if int(thing.address) > start_addr + num_bytes:
+        #    return disasm
 
         byte_ar = thing.bytes
         bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
-        print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
+        res_str = f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}"
+        disasm.append(res_str)
 
-    return
-    
-
-
-    return
+    return disasm
 
 
 def lief_get_file_type(path: Path):
@@ -155,6 +185,31 @@ def get_capstone_arch_mode(file_type:FileType)-> Tuple[int,int]:
         case _:
             raise Exception(f"No capstone arch and mode for file of type {file_type}")
 
+def disasm_bytes(path: Path, byts: str):
+
+    # Use lief for parsing!
+    parsed_bin = lief.parse(str(path.resolve()))
+
+    if parsed_bin.format is lief.EXE_FORMATS.UNKNOWN:
+        estr = f"Cannot parse file format {parsed_bin.format}" 
+        raise Exception(estr)
+
+    # Get information about the file type
+    file_type = get_file_type(path)
+
+    # Get the corresponding modes for the disasembler
+    cs_mode, cs_arch = get_capstone_arch_mode(file_type)
+    #print(f"File type: {file_type} mode {cs_mode} arch {cs_arch}")
+
+
+    md = Cs(cs_arch, cs_mode)
+
+    file_type = get_file_type(path)
+    cs_mode, cs_arch = get_capstone_arch_mode(file_type)
+
+    return list(md.disasm(byts, parsed_bin.entrypoint))
+
+
 def lief_disassemble_text_section(path: Path) -> list[CsInsn]:
     '''Disasm the file path'''
 
@@ -170,7 +225,7 @@ def lief_disassemble_text_section(path: Path) -> list[CsInsn]:
 
     # Get the corresponding modes for the disasembler
     cs_mode, cs_arch = get_capstone_arch_mode(file_type)
-    print(f"File type: {file_type} mode {cs_mode} arch {cs_arch}")
+    #print(f"File type: {file_type} mode {cs_mode} arch {cs_arch}")
 
 
     md = Cs(cs_arch, cs_mode)
@@ -180,14 +235,6 @@ def lief_disassemble_text_section(path: Path) -> list[CsInsn]:
     cs_mode, cs_arch = get_capstone_arch_mode(file_type)
 
     return list(md.disasm(text_section.content, parsed_bin.entrypoint))
-
-    #if parsed_bin.format == lief.EXE_FORMATS.ELF:
-    #    text_section = parsed_bin.get_section(".text")
-    #elif parsed_bin.format == lief.EXE_FORMATS.PE:
-    #else:
-    #    raise Exception("File is neither PE or ELF")
-    return res
-
 
 def disassemble_text_section(file_path:Path)->list[CsInsn]:
     '''Disasm the file path'''
