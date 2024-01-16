@@ -261,8 +261,82 @@ def xda_predict(inp_file: Path, model, out_file:Path = None):
 
     return true_pos, false_pos, true_neg, false_neg, total_time
 
+@app.command()
+def unified_gen_training(
+        bin_dir: Annotated[str, typer.Argument()],
+        num_pretrain: Annotated[int, typer.Argument(help="Per opt, number of bins to use")],
+        num_finetine: Annotated[int, typer.Argument(help="Per opt, number of bins to use")],
+        num_valid: Annotated[int, typer.Argument(help="Per opt, number of bins to use")],
+    ):
+    '''
+    For each pretraining dataset used in other experiemnts, pick x binaries.
+    For each finetuning dataset used in other expriments, pick y binaries 
 
-def generate_data_src_pretrain_all(list_of_paths):
+    Pretraining requires a minimum of 4 bins for pre training 
+    '''
+
+    # TODO: Hardcoded
+    # Go to each of the previously used dataset, and pick bins
+    base_path = Path("LOCAL_RESULTS")
+
+    # Store the bins
+    pretrain_dict = {}
+    finetune_dict = {}
+
+    # All pretrain, valid,finetune
+    pretrain_tot = []
+    finetune_tot = []
+    valid_tot = []
+
+    for dir in base_path.iterdir():
+        pretrain = dir / Path("dataset_pretrain")
+        finetune = dir / Path("dataset_finetune")
+
+        pretrain_bins = random.sample(list(pretrain.glob('*')), num_pretrain)
+        for bin in pretrain_bins:
+            pretrain_tot.append(bin)
+        pretrain_dict[dir] = pretrain_bins
+
+        finetune_bins = random.sample(list(finetune.glob('*')), num_pretrain)
+        for bin in finetune_bins:
+            finetune_tot.append(bin)
+        finetune_dict[dir] = finetune_bins
+
+        bins_for_valid = [ x for x in list(pretrain.glob('*')) if x not in pretrain_bins]
+        valid_bins = random.sample(bins_for_valid, num_pretrain)
+        for bin in valid_bins:
+            valid_tot.append(bin)
+        finetune_dict[f"VALID_{dir}"] = valid_bins
+    
+    print(f"Pretain: {pretrain_tot}")
+    print(f"Finetuen: {finetune_tot}")
+    generate_data_src_pretrain_all(pretrain_tot, valid_tot)
+    generate_data_src_finetune_for_funcbound(finetune_tot)
+
+    return
+
+@app.command()
+def gen_pretrain_data(
+        bin_dir: Annotated[str, typer.Argument()],
+        num_validation_bins: Annotated[int, typer.Argument()],
+    ):
+
+    bins_path = Path(bin_dir)
+    if not bins_path.exists():
+        print(f"Bin path {bins_path} does not exist")
+        return
+
+    bins_list = list(bins_path.rglob('*'))
+
+    # Get random valudation bins, default to 4 of them 
+    valid = random.sample(bins_list, num_validation_bins)
+    bins_path = [x for x in bins_list if x not in valid]
+
+    generate_data_src_pretrain_all(bins_list, valid)
+
+    return
+
+def generate_data_src_pretrain_all(train_bins, validation_bins):
     '''
     For pretraining on our own data, concatenate all bytes from 
     all binaries and delimit by a newline so that each line does 
@@ -281,8 +355,8 @@ def generate_data_src_pretrain_all(list_of_paths):
 
     train_path = Path("data-src/pretrain_all/train.in")
     valid_path = Path("data-src/pretrain_all/valid.in")
-    train_files = list_of_paths[:-4]
-    valid_files = list_of_paths[-4:]
+    train_files = train_bins
+    valid_files = validation_bins
 
     with open(train_path, 'w') as f:
         for file in train_files:
@@ -682,6 +756,7 @@ def read_log(
 
 
     return
+
 
 
 
