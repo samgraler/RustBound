@@ -731,6 +731,7 @@ def read_log(
         stripped_bin = gen_strip_file(bin)
         res['size'] += bin.stat().st_size
         res['stripped_size'] += stripped_bin.stat().st_size
+        stripped_bin.unlink()
 
     print(res)
     print(f" The total runtime: {tot_runtime} seconds")
