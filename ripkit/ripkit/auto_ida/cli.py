@@ -70,6 +70,45 @@ def get_lief_functions(bin_path: Path):
     func_addrs = np.array(func_addrs)
     return FoundFunctions(func_addrs, func_names)
 
+def generate_ida_cmd(
+        binary: Path,
+        logfile: Path,
+        ida_script: Path):
+    '''
+    Geneate a command to run IDA with the selected script
+
+    binary: Path
+        Binary to analyze with IDA Pro
+    logfile: Path
+        The output file for the analysis, typically is parsed for results
+    ida_script: Path
+        Script using IDA Pro's API to run for analysis
+    '''
+
+    ida = Path("~/idapro-8.3/idat64").expanduser()
+    return f'{ida.resolve()} -c -A -S"{ida_script.resolve()}" -L{logfile.resolve()} {binary.resolve()}'
+
+#TODO: Bad implementation... hard coded, but fast 
+def generate_ida_cmd_bounds(binary: Path, logfile: Path):
+    '''
+    Generate command to run IDA with the selected script 
+
+    binary: Path 
+        The binary to run IDA on 
+
+    logile: Path
+        The output file for the analysis, typically is parsed for results
+    '''
+
+    bound_list = Path(os.path.abspath(__file__)).parent / "function_bounds_list.py"
+    bound_list = bound_list.resolve()
+
+    clear_cmd = f"rm {binary.resolve()}.i64"
+
+    return generate_ida_cmd(binary, logfile, bound_list), clear_cmd
+
+
+
 
 def make_ida_cmd(binary: Path, logfile: Path):
 
@@ -86,6 +125,38 @@ def make_ida_cmd(binary: Path, logfile: Path):
 
     return cmd, clear_cmd
 
+
+@dataclass
+class FoundFunction:
+    start_addr: str
+    end_addr: str
+    name: str
+
+
+def read_bounds_log(rawlog: Path)->List[FoundFunction]:
+    '''
+    Parse raw log generated from ida on command
+    '''
+
+    # Function tuples 
+    func_tuples = []
+
+    # Read the log 
+    with open(rawlog, 'r') as f:
+
+        # The lines in the output will have 
+        # FUNCTION, addr, function_name
+        for line in f.readlines():
+            if "FUNCTION," in line:
+                _, start_addr, length, name = line.split(',')
+                start_addr = start_addr.strip()
+                length = length.strip()
+                end_addr = start_addr + length
+                name = name.strip()
+                #func_tuples.append((start_addr, end_addr, name))
+                func_tuples.append(FoundFunction(start_addr, end_addr, name))
+
+    return func_tuples
 
 
 def read_raw_log(rawlog: Path):
@@ -112,7 +183,29 @@ def read_raw_log(rawlog: Path):
 
 
 @app.command()
-def ida_on(binary: Annotated[str, typer.Argument(help="bin to run on")], 
+def ida_bounds(
+           binary: Annotated[str, typer.Argument(help="bin to run on")], 
+           resfile: Annotated[str, typer.Argument(help="name of result file")],
+    ):
+
+    bin = Path(binary)
+    if not bin.exists():
+        print(f"Bin {bin} does not exist")
+        return
+    
+    funcs, runtime = get_ida_bounds(bin)
+
+    with open(Path(resfile), 'w') as f:
+        for func in funcs:
+            f.write(f"{func.start_addr}, {func.end_addr}\n")
+
+    print(f"Runtime: {runtime}")
+    return
+
+
+@app.command()
+def ida_on(
+           binary: Annotated[str, typer.Argument(help="bin to run on")], 
            logfile: Annotated[str, typer.Argument(help="bin to run on")],
            resfile: Annotated[str, typer.Argument(help="name of result file")]):
     '''
@@ -139,6 +232,40 @@ def ida_on(binary: Annotated[str, typer.Argument(help="bin to run on")],
     # Remove the database file 
     res = subprocess.check_output(clear_cmd, shell=True)
     return
+
+
+
+
+def get_ida_bounds(file: Path):
+
+    # To get the functions, ida logs all the std to a log file 
+    #ida_log_file = file.resolve().parent / f"{file.name}_IDA_LOG.log"
+    ida_log_file = Path(".") / f"{file.name}_IDA_LOG.log"
+
+    # Get the commands to run ida and clear the extra files 
+    cmd, clear_cmd = generate_ida_cmd_bounds(file, ida_log_file)
+    start = time.time()
+
+    # Run the command to run ida 
+    res = subprocess.check_output(cmd,shell=True)
+
+    #res = subprocess.run(cmd,text=True,capture_output=True,
+    #                     universal_newlines=True)
+
+    runtime = time.time() - start
+
+    # Fet the functions from the log file 
+    funcs = read_bounds_log(ida_log_file)
+
+    # Delete the log file 
+    ida_log_file.unlink()
+
+    # Remove the database file 
+    res = subprocess.check_output(clear_cmd, shell=True)
+
+    return funcs, runtime
+
+
 
 def get_ida_funcs(file: Path):
 
@@ -200,6 +327,65 @@ def gen_strip_file(bin_path:Path):
         return Path("")
 
     return strip_bin
+
+
+@app.command()
+def batch_get_bounds(
+               inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
+               out_dir: Annotated[str, typer.Argument(help="Directory to output logs")], 
+               strip: Annotated[bool, typer.Option(help="Strip the files before running")] = False, 
+               ):
+    '''
+    Batch run ida on bins
+    '''
+
+    out_path = Path(out_dir)
+
+    if not out_path.exists():
+        out_path.mkdir()
+        return
+
+    # Make the time dir
+    time_dir = out_path.parent / f"{Path(out_dir).name}_TIME"
+    if not time_dir.exists():
+        time_dir.mkdir()
+
+    # Get a list of files
+    files = list(Path(inp_dir).rglob('*'))
+
+    # For each file get the functions from IDA 
+    for file in alive_it(files):
+
+        # If strip, strip the file 
+        if strip:
+            nonstrip = file
+            file =  gen_strip_file(file)
+
+        # Ge the ida funcs
+        funcs, runtime = get_ida_bounds(file)
+
+        # Delete the stripped file
+        if strip:
+            file.unlink()
+            file = nonstrip
+
+        # The result file a a path obj
+        resfile = Path(out_dir) / f"{file.name}_RESULT"
+        time_file = time_dir / f"{resfile.name}_runtime"
+
+        # Save the funcs to the out file
+        #with open(Path(resfile), 'w') as f:
+        #    for func in funcs:
+        #        f.write(f"{func..strip()}, {func[1].strip()}\n")
+        #with open(time_file, 'w') as f:
+        #    f.write(f"{runtime}")
+
+        with open(Path(resfile), 'w') as f:
+            for func in funcs:
+                f.write(f"{func.start_addr}, {func.end_addr}\n")
+        with open(time_file, 'w') as f:
+            f.write(f"{runtime}")
+    return 
 
 
 

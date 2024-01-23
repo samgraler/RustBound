@@ -522,7 +522,7 @@ class arch_stats():
     funcs: int
 
 
-def num_funcs(path:Path):
+def lief_num_funcs(path:Path):
 
    functions = get_functions(path)
    parsed_bin = lief.parse(str(path.resolve()))
@@ -543,10 +543,11 @@ def num_funcs(path:Path):
    return len(func_start_addrs.keys())
 
 
+
 @app.command()
 def stats():
     '''
-    Print stats about the ripped binaries
+    Print statistics about the ripped binaries in the ripbin database
     '''
 
     # Dict of info
@@ -585,7 +586,7 @@ def stats():
 
         stats[dict_key].files += 1
         stats[dict_key].size += bin_file.stat().st_size
-        stats[dict_key].funcs += num_funcs(bin_file)
+        stats[dict_key].funcs += lief_num_funcs(bin_file)
 
     for (arch, opt), data in stats.items():
         if arch != "":
@@ -596,6 +597,9 @@ def stats():
         print(f"    {data.size} bytes")
     return
 
+#TODO: drop bit and file type and replace with a target type.
+#       may be have create a custom type that wraps targets for rust and 
+#       go 
 @app.command()
 def export_large_dataset(
     bit: Annotated[int, typer.Argument()],
@@ -604,10 +608,15 @@ def export_large_dataset(
         help="Save the binaries to a directory")]="",
     output_file: Annotated[str, typer.Option(
         help="Save the binaries paths to a file")]="",
-    min_text_bytes: Annotated[int, typer.Option()]=2000,
-    drop_dups: Annotated[bool, typer.Option()]=True,
+    min_text_bytes: Annotated[int, typer.Option(
+        help="Minimum number of bytes in a files .text section")]=2000,
+    drop_dups: Annotated[bool, typer.Option(
+        help="Don't include duplicate files")]=True,
     verbose: Annotated[bool, typer.Option]=False,
     ):
+    '''
+    Export a dataset from the ripkit db
+    '''
 
     out_to_dir = False
     out_to_file = False
@@ -1383,6 +1392,37 @@ def dataset_stats(
     print(stats)
     return
 
+
+def get_func_addrs(file: Path):
+        #file_disasm = lief_disassemble_text_section(file)
+
+        # Get the functions 
+        functions = get_functions(file)
+
+        # Add to the prologues dict the prologues
+
+        #bin = lief.parse(str(file.resolve()))
+
+        #text_section = bin.get_section(".text")
+        #text_bytes = text_section.content
+
+        # Get the bytes in the .text section
+        #text_bytes = text_section.content
+
+        # Get the base address of the loaded binary
+        #base_address = bin.imagebase
+
+        return {x.addr : (x.name, x.size) for x in functions}
+
+
+
+@dataclass
+class Byte_Sequence:
+    addr: str
+    value: str
+    file: str
+
+
 @app.command()
 def search_for_bytes(
     dataset: Annotated[str,typer.Argument(help="The dataset")],
@@ -1393,26 +1433,27 @@ def search_for_bytes(
     '''
 
 
-    # Get the files
-    files = list(Path(dataset).glob('*'))
+    if Path(dataset).is_dir():
+        # Get the files
+        files = list(Path(dataset).glob('*'))
+    elif Path(dataset).is_file():
+        files = [Path(dataset)]
+    else:
+        return
 
     # Save the occruacnes here 
     prologue_occurances = []
     non_pro_occurances = []
 
+    length = len(input_seq.split(" "))
+
     for file in alive_it(files):
 
-        #file_disasm = lief_disassemble_text_section(file)
-
-        # Get the functions 
-        functions = get_functions(file)
-
-        # Add to the prologues dict the prologues
+        # get the start addrs
+        func_start_addrs = {x.addr : (x.name, x.size) for x in get_functions(file)}
 
         bin = lief.parse(str(file.resolve()))
-
         text_section = bin.get_section(".text")
-        text_bytes = text_section.content
 
         # Get the bytes in the .text section
         text_bytes = text_section.content
@@ -1420,20 +1461,22 @@ def search_for_bytes(
         # Get the base address of the loaded binary
         base_address = bin.imagebase
 
-        func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
-
-        length = len(input_seq.split(" "))
-
         # This enumerate the .text byte and sees which ones are functions
         for i, _ in enumerate(text_bytes):
             address = base_address + text_section.virtual_address + i
 
+            if i + length > len(text_bytes) + 1:
+                break
+
             sub_seq = " ".join(str(hex(x)) for x in text_bytes[i:i+length])
+
             if sub_seq == input_seq:
                 if address in func_start_addrs.keys():
                     prologue_occurances.append((address,file))
                 else:
                     non_pro_occurances.append((address,file))
+
+    print("Done searching")
 
 
     with open("NON_PRO_OCCURNACE",'w') as f:
@@ -1441,8 +1484,10 @@ def search_for_bytes(
             f.write(f"{file} ||||| {hex(addr)}\n")
 
     print(f"Total {len(prologue_occurances) + len(non_pro_occurances)}")
-    print(f"Prologue {len(prologue_occurances)} | First occurance {hex(prologue_occurances[0][0])} file: {prologue_occurances[0][1]}")
-    print(f"NonPrologue {len(non_pro_occurances)} | First occurance {hex(non_pro_occurances[0][0])}  file: {non_pro_occurances[0][1]}")
+    if len(prologue_occurances) > 0:
+        print(f"Prologue {len(prologue_occurances)} | First occurance {hex(prologue_occurances[0][0])} file: {prologue_occurances[0][1]}")
+    if len(non_pro_occurances) > 0:
+        print(f"NonPrologue {len(non_pro_occurances)} | First occurance {hex(non_pro_occurances[0][0])}  file: {non_pro_occurances[0][1]}")
 
     with open("_PROLOGUES", 'w') as f:
         for (addr, file) in prologue_occurances:
@@ -1459,30 +1504,12 @@ def search_for_bytes(
     return
 
 
-
-@app.command()
-def top_prologues(
-    dataset: Annotated[str,typer.Argument(help="The dataset")],
-    length: Annotated[int,typer.Argument(help="Number of bytes for the prologue")],
-    ):
+def get_progs(files: List[Path], prolog_size: int ):
     '''
-    Find Common prologues
+    Get list of prologues for all files 
     '''
-
-    files = list(Path(dataset).glob('*'))
-
-    prologues = {}
-
-
-    # Save the adresses where a prologue occurs
-    addrs = {}
-
-    # Save the disasm
-    disams = {}
 
     for file in alive_it(files):
-
-        #file_disasm = lief_disassemble_text_section(file)
 
         # Get the functions 
         functions = get_functions(file)
@@ -1510,21 +1537,91 @@ def top_prologues(
                 key = key.strip()
                 if key in prologues.keys():
                     prologues[key]+=1
+                    #addrs[key].append((address,file))
                     addrs[key].append(address)
                 else:
                     prologues[key] = 1
+                    #addrs[key] = [(address,file)]
                     addrs[key] = [address]
 
+
+
+
+    return
+
+@app.command()
+def top_prologues(
+    dataset: Annotated[str,typer.Argument(help="The dataset")],
+    length: Annotated[int,typer.Argument(help="Number of bytes for the prologue")],
+    examples: Annotated[int,typer.Argument(help="Num of head and tail prologues")],
+    ):
+    '''
+    Find Common prologues
+    '''
+
+    if Path(dataset).is_dir():
+        files = list(Path(dataset).glob('*'))
+    elif Path(dataset).is_file():
+        files = [Path(dataset)]
+    else:
+        return
+
+
+    prologues = {}
+
+
+    # Save the adresses where a prologue occurs
+    addrs = {}
+
+    # Save the disasm
+    disams = {}
+
+    for file in alive_it(files):
+
+        # Get the functions 
+        functions = get_functions(file)
+
+        # Add to the prologues dict the prologues
+
+        bin = lief.parse(str(file.resolve()))
+
+        text_section = bin.get_section(".text")
+        text_bytes = text_section.content
+
+        # Get the bytes in the .text section
+        text_bytes = text_section.content
+
+        # Get the base address of the loaded binary
+        base_address = bin.imagebase
+
+        func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+
+        # This enumerate the .text byte and sees which ones are functions
+        for i, _ in enumerate(text_bytes):
+            address = base_address + text_section.virtual_address + i
+            if address in func_start_addrs.keys():
+                key = " ".join(str(hex(x)) for x in text_bytes[i:i+length])
+                key = key.strip()
+                if key in prologues.keys():
+                    prologues[key]+=1
+                    #addrs[key].append((address,file))
+                    addrs[key].append(address)
+                else:
+                    prologues[key] = 1
+                    #addrs[key] = [(address,file)]
+                    addrs[key] = [address]
+
+                # BUG: This was not working, I was unable to correctly diasm
                 # Want to get the disasmable of a key
                 #disams[key] = disasm_at(file, address, length)
                 #disams[key] = disasm_with(file, address, length, file_disasm)
 
 
-    sorted_dict = dict(sorted(prologues.items(), key=lambda item: item[1],reverse=True))
+    most_common = dict(sorted(prologues.items(), key=lambda item: item[1],reverse=True))
     print(f"Max occurances: {max(prologues.values())}")
 
     count = 0
-    for key, value in sorted_dict.items():
+    for key, value in most_common.items():
         print(f"Count {value} | key: {key} | First Occurance: {hex(addrs[key][0])}")
 
         # TODO: The following was to print the assmebly for the prologue 
@@ -1552,15 +1649,60 @@ def top_prologues(
 
         #print(f"Disam: {disams[key]}")
         count+=1
-        if count > 5:
+        if count > examples:
+            print(f"Total unique funcs {len(prologues.values())}")
+            print(f"Total functions {sum(prologues.values())}")
+            break
+
+
+    least_common = dict(sorted(prologues.items(), key=lambda item: item[1],reverse=False))
+    # Least common 
+    print("Least common prologues...")
+    count = 0
+    for key, value in least_common.items():
+        print(f"Count {value} | key: {key} | First Occurance: {hex(addrs[key][0])}")
+
+        # TODO: The following was to print the assmebly for the prologue 
+        # to the screen, but... has been difficult, and doesn't make 
+        # sense for shorter prologues (however in the same breath, shorter 
+        # prologues don't make much sense unless they make atleast a whole
+        # instruction)
+        #res =  disasm_bytes(files[0], key.encode())
+
+        ## See the below for how the bytes_string is created, this does that 
+        ## but finds the longest one so I can format the output string nicely
+        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+
+        ## Format each byte in the res nicely
+        #for thing in res:
+        #    byte_ar = thing.bytes
+        #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
+        #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
+
+
+
+        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
+        # Turn the key into the disasm
+
+
+        #print(f"Disam: {disams[key]}")
+        count+=1
+        if count > examples:
             print(f"Total unique funcs {len(prologues.values())}")
             print(f"Total functions {sum(prologues.values())}")
             return
-
-
     return
 
 
 
 if __name__ == "__main__":
+
+    console.print(" ____   _         _  __ _  _         _   _   ____   ____          ____              ",style="bold", highlight=False)
+    console.print("|  _ \ (_) _ __  | |/ /(_)| |_      | | | | / ___| |  _ \   __ _ / ___|   ___   ___ ",style="bold", highlight=False)
+    console.print("| |_) || || '_ \ | ' / | || __| --  | | | || |     | | | | / _` |\___ \  / _ \ / __|",style="bold", highlight=False)
+    console.print("|  _ < | || |_) || . \ | || |_  --  | |_| || |___  | |_| || (_| | ___) ||  __/| (__ ",style="bold", highlight=False)
+    console.print("|_| \_\|_|| .__/ |_|\_\|_| \__|      \___/  \____| |____/  \__,_||____/  \___| \___|",style="bold", highlight=False)
+    console.print("          |_|                        ")
+    console.print("Dev: ESPR3SS0")
+    console.print("Lab: UC DaSec")
     app()
