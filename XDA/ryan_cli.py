@@ -261,12 +261,9 @@ def xda_predict(inp_file: Path, model, out_file:Path = None):
 
     return true_pos, false_pos, true_neg, false_neg, total_time
 
+
 @app.command()
 def unified_gen_training(
-        bin_dir: Annotated[str, typer.Argument()],
-        num_pretrain: Annotated[int, typer.Argument(help="Per opt, number of bins to use")],
-        num_finetine: Annotated[int, typer.Argument(help="Per opt, number of bins to use")],
-        num_valid: Annotated[int, typer.Argument(help="Per opt, number of bins to use")],
     ):
     '''
     For each pretraining dataset used in other experiemnts, pick x binaries.
@@ -275,43 +272,68 @@ def unified_gen_training(
     Pretraining requires a minimum of 4 bins for pre training 
     '''
 
-    # TODO: Hardcoded
-    # Go to each of the previously used dataset, and pick bins
-    base_path = Path("LOCAL_RESULTS")
+    # TODO warnings
 
-    # Store the bins
-    pretrain_dict = {}
-    finetune_dict = {}
 
-    # All pretrain, valid,finetune
-    pretrain_tot = []
-    finetune_tot = []
-    valid_tot = []
 
-    for dir in base_path.iterdir():
-        pretrain = dir / Path("dataset_pretrain")
-        finetune = dir / Path("dataset_finetune")
-
-        pretrain_bins = random.sample(list(pretrain.glob('*')), num_pretrain)
-        for bin in pretrain_bins:
-            pretrain_tot.append(bin)
-        pretrain_dict[dir] = pretrain_bins
-
-        finetune_bins = random.sample(list(finetune.glob('*')), num_pretrain)
-        for bin in finetune_bins:
-            finetune_tot.append(bin)
-        finetune_dict[dir] = finetune_bins
-
-        bins_for_valid = [ x for x in list(pretrain.glob('*')) if x not in pretrain_bins]
-        valid_bins = random.sample(bins_for_valid, num_pretrain)
-        for bin in valid_bins:
-            valid_tot.append(bin)
-        finetune_dict[f"VALID_{dir}"] = valid_bins
+    dataset_bins = Path("../datasets/20_file_subset/")
+    if not dataset_bins.exists():
+        print("Dataset does not exist")
+        return 
     
-    print(f"Pretain: {pretrain_tot}")
-    print(f"Finetuen: {finetune_tot}")
+    pretrain_tot = []
+    valid_tot = []
+    finetune_tot = []
+
+    for subset in dataset_bins.iterdir():
+        # 9 files in the subset goes to pretrain
+        # 1 file goes to validation 
+        # 10 files go to fintune 
+        subset_files = list(subset.glob('*'))
+        pretrain_tot.extend(subset_files[:9])
+        valid_tot.append(subset_files[9])
+        finetune_tot.extend(subset_files[10:])
+
     generate_data_src_pretrain_all(pretrain_tot, valid_tot)
     generate_data_src_finetune_for_funcbound(finetune_tot)
+    print("Ready to train new model...")
+
+    # TODO: Hardcoded
+    # Go to each of the previously used dataset, and pick bins
+
+    # Store the bins
+    #pretrain_dict = {}
+    #finetune_dict = {}
+
+    ## All pretrain, valid,finetune
+    #pretrain_tot = []
+    #finetune_tot = []
+    #valid_tot = []
+
+    #for dir in base_path.iterdir():
+    #    pretrain = dir / Path("dataset_pretrain")
+    #    finetune = dir / Path("dataset_finetune")
+
+    #    pretrain_bins = random.sample(list(pretrain.glob('*')), num_pretrain)
+    #    for bin in pretrain_bins:
+    #        pretrain_tot.append(bin)
+    #    pretrain_dict[dir] = pretrain_bins
+
+    #    finetune_bins = random.sample(list(finetune.glob('*')), num_pretrain)
+    #    for bin in finetune_bins:
+    #        finetune_tot.append(bin)
+    #    finetune_dict[dir] = finetune_bins
+
+    #    bins_for_valid = [ x for x in list(pretrain.glob('*')) if x not in pretrain_bins]
+    #    valid_bins = random.sample(bins_for_valid, num_pretrain)
+    #    for bin in valid_bins:
+    #        valid_tot.append(bin)
+    #    finetune_dict[f"VALID_{dir}"] = valid_bins
+    #
+    #print(f"Pretain: {pretrain_tot}")
+    #print(f"Finetuen: {finetune_tot}")
+    #generate_data_src_pretrain_all(pretrain_tot, valid_tot)
+    #generate_data_src_finetune_for_funcbound(finetune_tot)
 
     return
 

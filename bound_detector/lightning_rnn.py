@@ -165,13 +165,6 @@ class lit(pylight.LightningModule):
                           target.to('cpu'))
 
 
-
-app = typer.Typer()
-console = Console()
-
-
-
-
 # Custom dataset class
 class MyDataset(Dataset):
     def __init__(self, data, target):
@@ -187,12 +180,7 @@ class MyDataset(Dataset):
         return inp, target
 
 
-
-#logging.basicConfig(level=logging.INFO)
-#BAR_LOGGER = logging.getLogger('alive_progress')
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 app = typer.Typer()
 console = Console()
@@ -786,6 +774,61 @@ def gen_unified_train(
 
     return
 
+
+
+@app.command()
+def gen_npzs(bin_path: Annotated[str, typer.Argument()],
+             out_dir: Annotated[str, typer.Argument()],
+             sample: Annotated[int, typer.Option()] = 0,
+            ):
+    '''
+    Generate npz files
+    '''
+
+    bins_path = Path(bin_path)
+    out_path = Path(out_dir)
+
+    if not out_path.exists():
+        out_path.mkdir()
+
+    if bins_path.is_dir():
+        #TODO: This is best the first 100 are used for training
+        bins = list(bins_path.glob('*'))[:100]
+        if sample != 0 :
+            # Sample sample bins
+            bins = random.sample(bins,sample)
+
+    elif bins_path.is_file() and sample == 0:
+        bins = [bins_path]
+    else:
+        print(f"Does not exist {bins_path}")
+        return
+
+
+    for binary in alive_it(bins):
+
+        # Generate analysis
+        print("Generating Tensors...")
+        data = np.array(list(generate_minimal_labeled_features(binary)))
+
+        data_file = out_path / binary.name
+        index = 1
+        while data_file.exists():
+            data_file = out_path / Path(f"{binary.name}_{index}")
+            index+=1
+
+        print("Saving Tensor and binary")
+        try:
+            # Save the analysis to file 
+            np.savez_compressed(data_file , data=data)
+        except Exception as e:
+            raise Exception("Error")
+
+    print(f"Saved {len(bins)} new npzs")
+    return
+
+
+
 @app.command()
 def train_on(
         inp_dir: Annotated[str, typer.Argument(
@@ -795,6 +838,9 @@ def train_on(
     # Get the files from the input path
     #train_files = [f"{x." for x  in Path(inp_dir).rglob('*') ]
     train_files = list(Path(inp_dir).rglob('*'))
+
+    # Train files must be the npz version of the files...
+
 
     # Train on these files
     metrics, classifier = lit_model_train(train_files)
