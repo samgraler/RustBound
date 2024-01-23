@@ -447,7 +447,12 @@ def batch_get_funcs(
 
 
 #TODO: Remove new format as it gets phased out 
-def read_res(inp:Path, bin, debug=False, new_format=True):
+#TODO: This function only works when I am using the specific IDA script,
+#       I should specificy somewhere that this ONLY works for list_function_bounds
+def read_res(inp:Path, bin, new_format=True):
+    '''
+    Parse the IDA log file for a given analysis on a binary for functions
+    '''
 
     lief_funcs = get_functions(bin)
     gnd = {x.addr : (x.name, x.size) for x in lief_funcs}
@@ -462,16 +467,6 @@ def read_res(inp:Path, bin, debug=False, new_format=True):
                 res.append(int(line))
             else:
                 res.append(int(line,16))
-
-
-    if debug: 
-        with open('IDA_FUNC', 'w') as f:
-            for addr in res:
-                f.write(f'{addr}\n')
-        with open('LIEF_FUNC', 'w') as f:
-            gnd_start.sort()
-            for addr in gnd_start:
-                f.write(f'{addr}\n')
 
     # Each is a list of addresses
     same = np.intersect1d(gnd_start, res)
@@ -494,7 +489,6 @@ def read_results(
 
     files = Path(inp_dir).glob('*')
     bins = Path(bin_dir).glob('*')
-
 
     tot_size = 0
     # Get the size of the stripped bins 
