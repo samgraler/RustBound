@@ -688,10 +688,8 @@ def large_test():
     return
 
 
-def rnn_predict(model, unstripped_bin):
+def rnn_predict(model, unstripped_bin, threshold: float):
     # the rnn can predict chunks of 1000 bytes 
-
-    threshold = .9
 
     tp = 0
     tn = 0
@@ -731,8 +729,8 @@ def rnn_predict(model, unstripped_bin):
 
             # Score the prediction
             prediction = prediction.squeeze().to('cpu').numpy()
-            prediction[prediction >= 0.9] = 1
-            prediction[prediction < 0.9] = 0
+            prediction[prediction >= threshold] = 1
+            prediction[prediction < threshold] = 0
             target = lbl.squeeze()
 
             # Some each of the cases. The .item() changed the type from
@@ -1074,6 +1072,8 @@ def test_on(
                         help='Directory of bins to test on')],
         weights: Annotated[str, typer.Argument(
                     help='File of bins')],
+        threshold: Annotated[float, typer.Argument(
+                    help='Threshold for model prediction')],
         results: Annotated[str, typer.Argument(
                     help="Path to save results to")]):
 
@@ -1104,7 +1104,7 @@ def test_on(
     fn = 0
     log_file = Path(results)
     for file in alive_it(testfiles):
-        cur_tp, cur_tn, cur_fp, cur_fn, runtime = rnn_predict(model, file)
+        cur_tp, cur_tn, cur_fp, cur_fn, runtime = rnn_predict(model, file, threshold)
         tp+=cur_tp
         tn+=cur_tn
         fp+=cur_fp
