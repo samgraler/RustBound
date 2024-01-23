@@ -633,11 +633,21 @@ def save_results_timed(res, out_file:Path):
 
     return
 
+@dataclass
+class ConfMatrix:
+    tp: int
+    fp: int
+    tn: int
+    fn: int
+
 def xda_predict_many(inp_files, model, out_dir, save_results=False, use_saved=True):
     tot_tp = 0
     tot_tn = 0
     tot_fp = 0
     tot_fn = 0
+
+    confusion_matrix = ConfMatrix(0,0,0,0)
+
     for i, file_to_predict in enumerate(inp_files):
         print(f"File {i} of {len(inp_files)}")
         if not file_to_predict.exists():
@@ -673,15 +683,21 @@ def xda_predict_many(inp_files, model, out_dir, save_results=False, use_saved=Tr
         print(f"FN: {res[3]}")
         print(f"Runtime: {res[4]}")
         
-        tot_tp += res[0]
-        tot_tn += res[2]
-        tot_fp += res[1]
-        tot_fn += res[3]
+
+        confusion_matrix.tp += res[0]
+        confusion_matrix.tn += res[1]
+        confusion_matrix.fp += res[2]
+        confusion_matrix.fn += res[3]
+
+        #tot_tp += res[0]
+        #tot_tn += res[2]
+        #tot_fp += res[1]
+        #tot_fn += res[3]
         print("Running totals:")
-        print(f"TP: {tot_tp}")
-        print(f"TN: {tot_tn}")
-        print(f"FP: {tot_fp}")
-        print(f"FN: {tot_fn}")
+        print(f"TP: {confusion_matrix.tp}")
+        print(f"TN: {confusion_matrix.tn}")
+        print(f"FP: {confusion_matrix.fp}")
+        print(f"FN: {confusion_matrix.fn}")
 
 
     return tot_tp, tot_tn, tot_fp, tot_fn
@@ -787,12 +803,15 @@ def read_log(
     return
 
 @app.command()
-def timed_test(
+def test(
         inp_dir: Annotated[str, typer.Argument()],
         out_dir: Annotated[str, typer.Argument()],
         checkpoint_dir: Annotated[str, typer.Argument()],
         checkpoint: Annotated[str, typer.Argument()],
         ):
+    '''
+    Test XDA on a set of binaries.
+    '''
 
 
     # Make a list of the input file 
