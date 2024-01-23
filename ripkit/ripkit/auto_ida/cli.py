@@ -336,7 +336,7 @@ def batch_get_bounds(
                strip: Annotated[bool, typer.Option(help="Strip the files before running")] = False, 
                ):
     '''
-    Batch run ida on bins
+    Run IDA on the dataset and retrieve the detected function bounds
     '''
 
     out_path = Path(out_dir)
@@ -352,6 +352,9 @@ def batch_get_bounds(
 
     # Get a list of files
     files = list(Path(inp_dir).rglob('*'))
+
+    if len(files) == 0:
+        print("No files...")
 
     # For each file get the functions from IDA 
     for file in alive_it(files):
@@ -443,7 +446,8 @@ def batch_get_funcs(
     return 
 
 
-def read_res(inp:Path, bin, debug=False):
+#TODO: Remove new format as it gets phased out 
+def read_res(inp:Path, bin, debug=False, new_format=True):
 
     lief_funcs = get_functions(bin)
     gnd = {x.addr : (x.name, x.size) for x in lief_funcs}
@@ -454,7 +458,10 @@ def read_res(inp:Path, bin, debug=False):
     with open(inp, 'r') as f:
         for line in f.readlines():
             line = line.strip().split(',')[0].strip()
-            res.append(int(line,16))
+            if new_format:
+                res.append(int(line))
+            else:
+                res.append(int(line,16))
 
 
     if debug: 
@@ -475,11 +482,14 @@ def read_res(inp:Path, bin, debug=False):
     return same, lief_only, ida_only
 
 
+#TODO: Convert the old logs, which logged found functions using hex, to the new logs, which 
+#      logs found funcs using base 10
 @app.command()
 def read_results(
         inp_dir: Annotated[str, typer.Argument(help="Directory with results")],
         bin_dir: Annotated[str, typer.Argument(help="Directory with bins")],
         time_dir: Annotated[str, typer.Argument(help="Directory with time")],
+        is_new_format: Annotated[bool, typer.Option(help="Switch to off if results seem low. Older logs require this option to be false")]=False,
     ):
 
     files = Path(inp_dir).glob('*')
@@ -507,10 +517,11 @@ def read_results(
     tot_same = 0
     tot_lief_only = 0
     tot_ida_only = 0
-    debug=True
     for (file,bin) in alive_it(src):
-        same, lief_o, ida_o = read_res(file,bin,debug)
-        debug=False
+        if is_new_format:
+            same, lief_o, ida_o = read_res(file,bin,new_format=False)
+        else:
+            same, lief_o, ida_o = read_res(file,bin)
 
         tot_same += len(same)
         tot_lief_only += len(lief_o)
