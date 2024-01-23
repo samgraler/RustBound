@@ -319,7 +319,7 @@ def gen_one_hot_dataset(files: list[Path], num_chunks):
     data_info = []
 
     # Sanity check that all files exist TODO: This should be redundant and ultimately removed
-    files = [x for x in files if x.exists()]
+    #files = [x for x in files if x.exists()]
 
     # This is how many chunks per file to get, notice if a file is not 
     # long enough for this number of chunks, other files will just be 
@@ -405,20 +405,21 @@ def create_dataloaders(
     '''
 
     #print(f"Cache file {cache_file} does not exist")
-    if cache_file.exists():
-        data = np.empty((0,0))
-        lbl = np.empty((0,0))
-        with np.load(cache_file, mmap_mode='r') as f:
-            data = f['data']
-            lbl = f['lbl']
-    else:
+    #if cache_file.exists():
+    #    data = np.empty((0,0))
+    #    lbl = np.empty((0,0))
+    #    with np.load(cache_file, mmap_mode='r') as f:
+    #        data = f['data']
+    #        lbl = f['lbl']
+    #else:
         # Get the data set
-        if ends:
+    if ends:
 
-            data, lbl= gen_one_hot_dataset_ENDS(input_files,num_chunks=num_chunks)
-        else:
-            data, lbl= gen_one_hot_dataset(input_files,num_chunks=num_chunks)
-        np.savez(cache_file, data=data, lbl=lbl)
+        data, lbl= gen_one_hot_dataset_ENDS(input_files,num_chunks=num_chunks)
+    else:
+        data, lbl= gen_one_hot_dataset(input_files,num_chunks=num_chunks)
+
+    #np.savez(cache_file, data=data, lbl=lbl)
 
     # Get split the dataset
     train_data, valid_data, test_data = vsplit_dataset(data,
@@ -758,13 +759,42 @@ def rnn_predict(model, unstripped_bin):
     return tp, tn, fp, fn, runtime 
 
 @app.command()
-def train_on(
+def gen_unified_train(
         inp_dir: Annotated[str, typer.Argument(
                                     help='Directory of bings to train on')],
     ):
+    '''
+    Get files from each opt level to train on 
+    5 opt levels, 20 files each
+    Conviently, this is training on the whole small dataset
+    '''
+
+    train_files = []
+    for maybe_file in Path(inp_dir).rglob('*'):
+        if maybe_file.is_file():
+            train_files.append(maybe_file)
+
+
+    # Generate the npz files for them
+    if len(train_files) != 100:
+        print("should have 100")
+        return
+
+    # Train on these files
+    metrics, classifier = lit_model_train(train_files)
+    print([x.compute() for x in metrics])
+
+    return
+
+@app.command()
+def train_on(
+        inp_dir: Annotated[str, typer.Argument(
+                                    help='Directory of bins to train on')],
+    ):
 
     # Get the files from the input path
-    train_files = list(Path(inp_dir).rglob('*')) 
+    #train_files = [f"{x." for x  in Path(inp_dir).rglob('*') ]
+    train_files = list(Path(inp_dir).rglob('*'))
 
     # Train on these files
     metrics, classifier = lit_model_train(train_files)
