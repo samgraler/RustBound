@@ -1,4 +1,5 @@
 import typer
+from collections import Counter
 import numpy as np
 from enum import Enum
 import bench_ghidra.eval_ghidra as ghid_bench
@@ -1334,6 +1335,7 @@ class dataset_stat:
     text_section_size: int 
     functions: int 
     text_section_functions: int 
+    alias_count: int
 
 
 def gen_strip_file(bin_path:Path):
@@ -1359,6 +1361,7 @@ def gen_strip_file(bin_path:Path):
 @app.command()
 def dataset_stats(
     dataset: Annotated[str,typer.Argument()],
+    func_size: Annotated[int, typer.Argument(help="Minimum size of function to be considered function")]
     ):
     '''
     Get info on dataset. Expects a dataset to be all binaries, and all nonstripped
@@ -1366,13 +1369,22 @@ def dataset_stats(
 
     bins = list(Path(dataset).glob('*'))
 
-    stats = dataset_stat(0,0,0,0,0,0)
+    stats = dataset_stat(0,0,0,0,0,0,0)
 
     # Get the size of the stripped bins 
     for bin in alive_it(bins):
+
         stats.files += 1
         stats.file_size += bin.stat().st_size
-        stats.functions += len(get_functions(bin))
+
+        functions = get_functions(bin)
+        name_counts = Counter([x.name for x in functions])
+
+        alias_count = sum([count for _, count in name_counts.items() if count >= 2])
+        stats.alias_count += alias_count
+
+        min_size_functions = [x for x in functions if x.size >= func_size]
+        stats.functions += len(min_size_functions)
         stats.text_section_functions += len(get_text_functions(bin).addresses)
 
         stripped_bin = gen_strip_file(bin)
@@ -1695,14 +1707,9 @@ def top_prologues(
 
 
 
+from art import text2art
 if __name__ == "__main__":
 
-    console.print(" ____   _         _  __ _  _         _   _   ____   ____          ____              ",style="bold", highlight=False)
-    console.print("|  _ \ (_) _ __  | |/ /(_)| |_      | | | | / ___| |  _ \   __ _ / ___|   ___   ___ ",style="bold", highlight=False)
-    console.print("| |_) || || '_ \ | ' / | || __| --  | | | || |     | | | | / _` |\___ \  / _ \ / __|",style="bold", highlight=False)
-    console.print("|  _ < | || |_) || . \ | || |_  --  | |_| || |___  | |_| || (_| | ___) ||  __/| (__ ",style="bold", highlight=False)
-    console.print("|_| \_\|_|| .__/ |_|\_\|_| \__|      \___/  \____| |____/  \__,_||____/  \___| \___|",style="bold", highlight=False)
-    console.print("          |_|                        ")
-    console.print("Dev: ESPR3SS0")
-    console.print("Lab: UC DaSec")
+    banner = text2art("Ripkit", "random")
+    console.print(banner, highlight=False)
     app()

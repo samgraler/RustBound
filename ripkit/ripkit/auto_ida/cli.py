@@ -237,6 +237,9 @@ def ida_on(
 
 
 def get_ida_bounds(file: Path):
+    '''
+    Run the IDA analysis for function boundaries 
+    '''
 
     # To get the functions, ida logs all the std to a log file 
     #ida_log_file = file.resolve().parent / f"{file.name}_IDA_LOG.log"
@@ -385,7 +388,7 @@ def batch_get_bounds(
 
         with open(Path(resfile), 'w') as f:
             for func in funcs:
-                f.write(f"{func.start_addr}, {func.end_addr}\n")
+                f.write(f"{func.start_addr}, {func.end_addr}, {func.name}\n")
         with open(time_file, 'w') as f:
             f.write(f"{runtime}")
     return 
@@ -446,6 +449,21 @@ def batch_get_funcs(
     return 
 
 
+
+@dataclass
+class ConfusionMatrix:
+    tp: int
+    fp: int
+    tn: int
+    fn: int
+
+
+@dataclass
+class FileBundles:
+    same: np.ndarray
+    lief_unique: np.ndarray
+    ida_unique: np.ndarray
+
 #TODO: Remove new format as it gets phased out 
 #TODO: This function only works when I am using the specific IDA script,
 #       I should specificy somewhere that this ONLY works for list_function_bounds
@@ -457,24 +475,46 @@ def read_res(inp:Path, bin, new_format=True):
     lief_funcs = get_functions(bin)
     gnd = {x.addr : (x.name, x.size) for x in lief_funcs}
     gnd_start = np.array([int(x) for x in gnd.keys()])
+    gnd_ends = np.array([int(x+gnd[x][1]) for x in gnd.keys()])
 
-    res = []
+    ida_starts = [] 
+    ida_ends = [] 
+
+
     # Read the result 
     with open(inp, 'r') as f:
         for line in f.readlines():
-            line = line.strip().split(',')[0].strip()
             if new_format:
-                res.append(int(line))
+                ida_starts.append(line.strip().split(',')[0].strip())
+                ida_ends.append(line.strip().split(',')[1].strip())
+                #res.append((int(start_addr),int(end_addr)))
             else:
-                res.append(int(line,16))
+                line = line.strip().split(',')[0].strip()
+                ida_starts.append(int(line,16))
+
+    starts_bundle = FileBundles(
+        np.intersect1d(gnd_start, ida_starts),
+        np.setdiff1d( gnd_start, ida_starts),
+        np.setdiff1d( ida_starts, gnd_start),
+    )
 
     # Each is a list of addresses
-    same = np.intersect1d(gnd_start, res)
-    lief_only = np.setdiff1d( gnd_start, res)
-    ida_only = np.setdiff1d( res, gnd_start )
+    #starts_same = np.intersect1d(gnd_start, ida_starts)
+    #starts_lief_only = np.setdiff1d( gnd_start, ida_starts)
+    #starts_ida_only = np.setdiff1d( ida_starts, gnd_start )
 
+    # Get the ends results 
+    if new_format:
+        ends_bundle = FileBundles(
+            np.intersect1d(gnd_ends, ida_ends),
+            np.setdiff1d( gnd_ends, ida_ends),
+            np.setdiff1d( ida_ends, gnd_ends),
+        )
+    else:
+        ends_bundle = FileBundles(np.array([]),np.array([]), np.array([]))
 
-    return same, lief_only, ida_only
+    return starts_bundle, ends_bundle
+    #return starts_same, starts_lief_only, starts_ida_only
 
 
 #TODO: Convert the old logs, which logged found functions using hex, to the new logs, which 
@@ -484,7 +524,7 @@ def read_results(
         inp_dir: Annotated[str, typer.Argument(help="Directory with results")],
         bin_dir: Annotated[str, typer.Argument(help="Directory with bins")],
         time_dir: Annotated[str, typer.Argument(help="Directory with time")],
-        is_new_format: Annotated[bool, typer.Option(help="Switch to off if results seem low. Older logs require this option to be false")]=False,
+        is_new_format: Annotated[bool, typer.Option(help="Switch to off if results seem low. Older logs require this option to be false")]=True,
     ):
 
     files = Path(inp_dir).glob('*')
@@ -508,37 +548,74 @@ def read_results(
         bin = Path(f"{bin_dir}/{file.name.replace('_RESULT','')}")
         src .append((file,bin))
 
-    tot_same = 0
-    tot_lief_only = 0
-    tot_ida_only = 0
+
+    starts_conf_matrix = ConfusionMatrix(0,0,0,0)
+    ends_conf_matrix = ConfusionMatrix(0,0,0,0)
+
+
     for (file,bin) in alive_it(src):
         if is_new_format:
-            same, lief_o, ida_o = read_res(file,bin,new_format=False)
+            #same, lief_o, ida_o = read_res(file,bin,new_format=False)
+            starts, ends = read_res(file,bin,new_format=True)
         else:
-            same, lief_o, ida_o = read_res(file,bin)
+            starts, ends = read_res(file,bin,new_format=False)
+            #same, lief_o, ida_o = read_res(file,bin)
 
-        tot_same += len(same)
-        tot_lief_only += len(lief_o)
-        tot_ida_only += len(ida_o)
+        starts_conf_matrix.tp += len(starts.same)
+        starts_conf_matrix.fp += len(starts.ida_unique)
+        starts_conf_matrix.fn += len(starts.lief_unique)
+
+        ends_conf_matrix.tp += len(ends.same)
+        ends_conf_matrix.fp += len(ends.ida_unique)
+        ends_conf_matrix.fn += len(ends.lief_unique)
+
+
+        #tot_same += len(same)
+        #tot_lief_only += len(lief_o)
+        #tot_ida_only += len(ida_o)
+
+    try:
+        starts_recall = starts_conf_matrix.tp / (starts_conf_matrix.tp + starts_conf_matrix.fn)
+        ends_recall = ends_conf_matrix.tp / (ends_conf_matrix.tp + ends_conf_matrix.fn)
+
+        starts_prec = starts_conf_matrix.tp / (starts_conf_matrix.tp + starts_conf_matrix.fp)
+        ends_prec = ends_conf_matrix.tp / (ends_conf_matrix.tp + ends_conf_matrix.fp)
+
+        start_f1 = (2*starts_prec*starts_recall)/(starts_prec+starts_recall)
+        end_f1 = (2*ends_prec*ends_recall)/(ends_prec+ends_recall)
+    except ZeroDivisionError as e:
+        print(f"One of the tests resulted in: precision+recall == 0, or fp+tp=0, or tp+fn=0")
+        print(e)
+        print(starts_conf_matrix)
+        print(ends_conf_matrix)
+        return
 
     # Recall = # Correct Pos lbls /  # Ground Trurth Pos lbls
     # Recall = tp / (tp+fn) 
-    recall = tot_same / (tot_same+tot_lief_only)
+    #recall = tot_same / (tot_same+tot_lief_only)
 
     # Prec = #pos_lbl / #
     # Prec = tp / (tp+fp)
-    prec = tot_same / (tot_same + tot_ida_only)
+    #prec = tot_same / (tot_same + tot_ida_only)
 
     # F1 
-    f1 = (2*prec*recall)/(prec+recall)
+    #f1 = (2*prec*recall)/(prec+recall)
 
-    print(f"Recall:{recall}")     
-    print(f"Prev:{prec}")
-    print(f"F1:{f1}")
+    print(f"Starts............")
+    print(f"Recall:{starts_recall}")     
+    print(f"Prev:{starts_prec}")
+    print(f"F1:{start_f1}")
+    print(f"=========== ENDS ============")
+    print(f"Recall:{ends_recall}")     
+    print(f"Prev:{ends_prec}")
+    print(f"F1:{end_f1}")
     print(f"Size:{tot_size}")
     print(f"Time:{tot_time}")
     print(f"BPS:{tot_size/tot_time}")
-
+    print(f"============ START CONF MARTIX ==========")
+    print(starts_conf_matrix)
+    print(f"============ END CONF MARTIX ==========")
+    print(ends_conf_matrix)
     return
 
 
