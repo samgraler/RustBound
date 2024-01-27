@@ -18,6 +18,7 @@ sys.path.append (
     str(ripkit_dir)
 )
 from ripkit.ripbin import (
+    save_raw_experiment,
     get_functions,
 )
 
@@ -36,6 +37,7 @@ app = typer.Typer()
 class FoundFunctions():
     addresses: np.ndarray
     names: List[str]
+    lengths: np.ndarray
 
 
 
@@ -368,7 +370,9 @@ def batch_get_bounds(
             file =  gen_strip_file(file)
 
         # Ge the ida funcs
-        funcs, runtime = get_ida_bounds(file)
+        funcs , runtime = get_ida_bounds(file)
+        func_len_array = np.concatenate((funcs.addresses.T, funcs.lengths.T), axis=1)
+
 
         # Delete the stripped file
         if strip:
@@ -376,8 +380,12 @@ def batch_get_bounds(
             file = nonstrip
 
         # The result file a a path obj
-        resfile = Path(out_dir) / f"{file.name}_RESULT"
-        time_file = time_dir / f"{resfile.name}_runtime"
+        #resfile = Path(out_dir) / f"{file.name}_RESULT"
+        #time_file = time_dir / f"{resfile.name}_runtime"
+
+        result_path = Path(out_dir).joinpath(f"{bin.name}")
+        save_raw_experiment(file, runtime, func_len_array, result_path)
+
 
         # Save the funcs to the out file
         #with open(Path(resfile), 'w') as f:
@@ -386,11 +394,11 @@ def batch_get_bounds(
         #with open(time_file, 'w') as f:
         #    f.write(f"{runtime}")
 
-        with open(Path(resfile), 'w') as f:
-            for func in funcs:
-                f.write(f"{func.start_addr}, {func.end_addr}, {func.name}\n")
-        with open(time_file, 'w') as f:
-            f.write(f"{runtime}")
+        #with open(Path(resfile), 'w') as f:
+        #    for func in funcs:
+        #        f.write(f"{func.start_addr}, {func.end_addr}, {func.name}\n")
+        #with open(time_file, 'w') as f:
+        #    f.write(f"{runtime}")
     return 
 
 

@@ -16,6 +16,17 @@ import pandas as pd
 from pathlib import Path
 
 
+# LIEF reports length 
+# IDA reports length
+# Ghidra kind of reports length
+# 
+# These lenghs will be used to define an end address
+# end = start_addr + length - 1
+
+# XDA report prediction per byte
+# BiRNN reports prediction per byte
+
+
 
 class AnalysisType(Enum):
     ONEHOT_PLUS_FUNC_LABELS = "onehot_plus_func_labels"

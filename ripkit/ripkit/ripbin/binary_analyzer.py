@@ -34,6 +34,196 @@ from .analyzer_types import FunctionInfo, binaryFileExecSectionOnly, \
 from alive_progress import alive_bar
 
 
+@dataclass 
+class GroundTruth:
+    func_addrs: np.ndarray
+    func_lens: np.ndarray
+    func_names: List[str]
+    num_bytes: int
+
+@dataclass
+class ConfusionMatrix:
+    tp: int
+    fp: int
+    tn: int
+    fn: int 
+
+@dataclass
+class Metrics:
+    prec: float
+    recall: float
+    f1: float
+
+def calc_metrics(inp: ConfusionMatrix)->Metrics:
+    '''
+    Return F1, prec, and recall
+    '''
+    prec = inp.tp / (inp.tp + inp.fp)
+    recall = inp.tp / (inp.tp + inp.fn)
+    f1 = 2 * ((prec*recall)/(prec+recall))
+    return Metrics(prec,recall,f1)
+
+def lief_gnd_truth(bin_path: Path):
+    '''
+    Retrun labels all the functions in the .text section of the 
+    binary
+    '''
+    bin = lief.parse(str(bin_path.resolve()))
+
+    text_section = bin.get_section(".text")
+    text_bytes = text_section.content
+
+    # Get the bytes in the .text section
+    text_bytes = text_section.content
+
+    # Get the base address of the loaded binary
+    base_address = bin.imagebase
+
+    functions = get_functions(bin_path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+    func_addrs = []
+    func_names = []
+    func_lengths = []
+
+    # This enumerate the .text byte and sees which ones are functions
+    for i, _ in enumerate(text_bytes):
+        address = base_address + text_section.virtual_address + i
+        if address in func_start_addrs.keys():
+            func_addrs.append(address)
+            func_names.append(func_start_addrs[address][0])
+            func_lengths.append(func_start_addrs[address][1])
+
+    # Return the addrs and names 
+    func_addrs = np.array(func_addrs)
+    func_lens = np.array(func_lengths)
+    return GroundTruth(func_addrs, func_lens, func_names, len(text_bytes))
+
+def save_func_start_and_length(data:np.ndarray, save_path: Path):
+    '''
+    The ndarray that has:
+        | addr: int | length: int |
+
+    This should be used for Ghidra and IDA 
+    '''
+
+    # Make sure the save file has 2 columns, the address and the length
+    if data.shape[1] != 2:
+        raise Exception
+
+    np.savez_compressed(save_path, data)
+    return
+
+def save_every_byte_prob(data:np.ndarray, save_path:Path):
+    '''
+    The ndarray has:
+        | byte_val: int | probability of class |
+
+    Where class may be function start or function end 
+
+    This should be used for BiRNN
+    '''
+    if data.shape[1] != 2:
+        raise Exception
+
+
+    np.savez_compressed(save_path, data)
+    return
+
+def save_three_class_byte_prob(data:np.ndarray, save_path:Path):
+    '''
+    The ndarray has:
+        | byte_val: int | prob class1 | prob class2 | prob class 3|
+    '''
+    if data.shape[1] != 4:
+        raise Exception
+
+    np.savez_compressed(save_path, data)
+    return
+
+def save_raw_experiment(bin: Path,
+                        runtime: float, 
+                        funcs_and_length: np.ndarray, 
+                        base_path:Path):
+    '''
+    Save numpy data and other info
+
+    base_path: Path
+        Directory to save the experiment. Each experiment will make a new 
+        directory in base_path that will have info.txt and {bin.name}_result.npz
+    '''
+
+    # Check that the dir exists, and is not a file 
+    if base_path.exists() and base_path.is_file():
+        raise Exception
+    elif not base_path.exists():
+        base_path.mkdir()
+
+    # Make the sub directory
+    sub_dir = base_path.joinpath(bin.name)
+    sub_dir.mkdir()
+
+    # Save the compressed matrix
+    matrix_saved = sub_dir.joinpath(f"{bin.name}_result")
+    save_func_start_and_length(funcs_and_length, matrix_saved)
+
+    # Save the runtime
+    runtime_file = sub_dir.joinpath("runtime.txt")
+    with open(runtime_file, 'w') as f:
+        f.write(f"{runtime}")
+    return
+
+
+
+
+def generate_features(path: Path, minimum_func_length, one_hot=True, label_functions=True):
+    '''
+    Generate npz for given binary
+    '''
+
+    functions = get_functions(path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions if x.size > minimum_func_length}
+
+    func_end_addrs = {} 
+    for start, (_,size) in func_start_addrs.items():
+        func_end_addrs[start] = start + size - 1
+
+
+    parsed_bin = lief.parse(str(path.resolve()))
+    text_section = parsed_bin.get_section(".text")
+
+    # Get the bytes in the .text section
+    text_bytes = text_section.content
+
+    # Get the base address of the loaded binary
+    base_address = parsed_bin.imagebase
+
+    for i, byte in enumerate(text_bytes):
+        address = base_address + text_section.virtual_address + i
+        func_start = True if address in func_start_addrs.keys() else False
+        func_end = True if address in func_end_addrs.keys() else False
+        func_middle = True if not func_start and not func_end else False
+        if one_hot:
+            byte = one_hot_encoding(byte)
+            if label_functions:
+                yield np.array([func_start, func_middle, func_end, *byte], 
+                       dtype=np.bool_)
+            else:
+                yield np.array([*byte])
+
+        else:
+
+            if label_functions:
+                yield np.array([func_start, func_middle, func_end, 
+                            byte], 
+                            dtype=np.uint16)
+            else:
+                yield np.array([byte])
+
+
+
+
 def disasm_with(path: Path, start_addr: int, num_bytes: int, res ) -> List[str]:
     '''
     Disasemble start at the given address 

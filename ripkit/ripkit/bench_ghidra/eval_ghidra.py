@@ -31,7 +31,11 @@ sys.path.append (
     str(ripkit_dir)
 )
 from ripkit.ripbin import (
+    calc_metrics,
+    ConfusionMatrix,
+    lief_gnd_truth,
     get_functions,
+    save_raw_experiment,
 )
 import typer
 
@@ -187,8 +191,6 @@ def get_ghidra_bounds(bin_path, post_script: Path =
 
 
 
-
-
 def append_bnext(inp_list):
     """
     given a list integers, calculate the distane 
@@ -231,13 +233,13 @@ def find_offset(lief_addrs, ghidra_addrs):
 
     # BUG: This is temp make sure to take it away 
     # BUG Write this to save the bnext to files 
-    #with open("GHID_FUNC", 'w') as f:
-    #    for i, (func, bnext) in enumerate(ghid_addr_bnext):
-    #        f.write(f"{func} : {bnext}\n")
+    with open("GHID_FUNC", 'w') as f:
+        for i, (func, bnext) in enumerate(ghid_addr_bnext):
+            f.write(f"{func} : {bnext}\n")
 
-    #with open("LIEF_FUNC", 'w') as f:
-    #    for i, (func,bnext) in enumerate(lief_addrs):
-    #        f.write(f"{func} : {bnext}\n")
+    with open("LIEF_FUNC", 'w') as f:
+        for i, (func,bnext) in enumerate(lief_addrs):
+            f.write(f"{func} : {bnext}\n")
 
 
 
@@ -299,7 +301,7 @@ def get_lief_functions(bin_path: Path):
 def inbetween_inc(x,min,max):
     return x <= max and x >= min
 
-def test_lief_v_ghid_bounds(bin_path, ghidra_flags, strip_file, save_to_location: Path = None ):
+def get_ghid_bounds(bin_path, ghidra_flags, use_offset:bool, strip_the_bin: bool = True):
     """
     Run a test of lief vs ghidra 
 
@@ -311,17 +313,38 @@ def test_lief_v_ghid_bounds(bin_path, ghidra_flags, strip_file, save_to_location
     # Get the functions from lief
     lief_functions =  get_lief_functions(bin_path)
 
-    #print(f"LIEF FUNCS: {len(lief_functions.addresses)}")
-
     # Strip the file is desired:
-    if strip_file:
-        bin_path = gen_strip_file(bin_path)
-
     post_script = Path(os.path.abspath(__file__)).parent / "ghidra_bounds_script.py"
 
     # Get the functons from ghidra 
-    ghidra_functions, runtime = get_ghidra_bounds(bin_path, post_script=post_script.resolve(),
-                                    other_flags=ghidra_flags)
+    ghidra_functions, runtime = get_ghidra_bounds(bin_path, 
+                                        post_script=post_script.resolve(),
+                                        other_flags=ghidra_flags)
+
+    if strip_the_bin:
+        bin_path = gen_strip_file(bin_path)
+    try:
+        offset = find_offset(list(lief_functions.addresses), 
+                             list(ghidra_functions.addresses))
+    finally:
+        if strip_the_bin:
+            bin_path.unlink()
+
+    # Apply the offset
+    offset_ghid_funcs = np.array([x-offset for x in ghidra_functions.addresses] )
+
+
+    if use_offset:
+        print(f"Offset ghid func {offset_ghid_funcs.shape}")
+        print(f"Len {ghidra_functions.lengths.shape}")
+        func_len_array = np.concatenate((offset_ghid_funcs.T.reshape(-1,1), 
+                                ghidra_functions.lengths.T.reshape(-1,1)), axis=1)
+        print(func_len_array.shape)
+    else:
+        func_len_array = np.concatenate((ghidra_functions.addresses.T.reshape(-1,1), 
+                                         ghidra_functions.lengths.T.reshape(-1,1)), axis=1)
+    return func_len_array, runtime
+
 
     #print(f"GHIDRA FUNCS: {len(ghidra_functions.addresses)}")
 
@@ -385,7 +408,6 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
     # Get the functions from lief
     lief_functions =  get_lief_functions(bin_path)
 
-    print(f"LIEF FUNCS: {len(lief_functions.addresses)}")
 
     # Strip the file is desired:
     if strip_file:
@@ -396,8 +418,6 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
     # Get the functons from ghidra 
     ghidra_functions, runtime = get_ghidra_functions(bin_path, post_script=post_script.resolve(),
                                     other_flags=ghidra_flags)
-
-    print(f"GHIDRA FUNCS: {len(ghidra_functions.addresses)}")
 
     #TODO: Offset 
     # Need to apply the offset to the ghidra functions 
@@ -445,6 +465,140 @@ def test_lief_v_ghid(bin_path, ghidra_flags, strip_file, save_to_location: Path 
         bin_path.unlink()
 
     return same, lief_only, ghid_only, runtime
+
+
+@app.command()
+def read_bounds_raw(
+    input_dir : Annotated[str,typer.Argument()],
+    bin_dir: Annotated[str, typer.Argument()],
+    verbose: Annotated[bool, typer.Option()] = False,
+    ):
+    '''
+    Read the input dir and compute results using the lief module
+    '''
+
+    input_path = Path(input_dir)
+    if not input_path.exists(): 
+        print(f"Inp dir {input_dir} is not a dir")
+        return
+
+    bin_path = Path(bin_dir)
+    if not bin_path.exists():
+        print(f"Bin dir {bin_dir} is not a dir")
+        return
+
+    matching_files = {}
+    for bin in bin_path.glob('*'):
+        for res_file in input_path.rglob('*'):
+            if ".npz" not in res_file.name:
+                continue
+            elif res_file.name.replace("_result.npz","") == bin.name:
+                matching_files[bin] = res_file
+
+    if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
+        print(f"Some bins don't have matching result file")
+        raise Exception
+
+
+    total_start_conf = ConfusionMatrix(0,0,0,0)
+    total_bound_conf = ConfusionMatrix(0,0,0,0)
+    total_bytes = 0
+
+    for bin in alive_it(list(matching_files.keys())):
+        # Init the confusion matrix for this bin
+        start_conf = ConfusionMatrix(0,0,0,0)
+        bound_conf = ConfusionMatrix(0,0,0,0)
+
+
+        # 1  - Ground truth for bin file 
+        gnd_truth = lief_gnd_truth(bin.resolve())
+        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+
+
+        # 2 - Find the npz with the ghidra funcs and addrs, chop of functions that 
+        #     are out-of-bounds of the lief functions (these are functions that are
+        #       likely outside of the .text section)
+        ghid_funcs = read_ghid_npz(matching_files[bin])
+
+        # 3 - Apply the offset to the ghidra funcs
+        offset = find_offset(sorted(gnd_matrix[:,0].tolist()), 
+                             sorted((ghid_funcs[:,0].tolist())))
+
+        offset_funcs = ghid_funcs.copy()
+        offset_funcs[:,0] += offset
+
+        # 4 - Mask the array so we only include bytes in .text
+        mask = ((ghid_funcs[:,0] < np.max(gnd_truth.func_addrs)) & 
+                    ghid_funcs[:,0] > np.min(gnd_truth.func_addrs))
+        filt_ghid_funcs= ghid_funcs[mask]
+
+        mask = ((offset_funcs[:,0]  < np.max(gnd_truth.func_addrs)) & 
+                    (offset_funcs[:,0] >  np.min(gnd_truth.func_addrs)))
+        filt_offset_funcs = offset_funcs[mask]
+
+        # 3 - Compare the two lists
+
+        # Get all the start addrs that are in both, in ghid only, in gnd_trush only
+        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], filt_offset_funcs[:,0]))
+        start_conf.fp=len(np.setdiff1d( filt_offset_funcs[:,0], gnd_matrix[:,0] ))
+        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], filt_offset_funcs[:,0]))
+
+        # tp + fp = Total predicted
+        if not start_conf.tp + start_conf.fp == filt_offset_funcs.shape[0]:
+            print(f"{start_conf.tp}")
+            print(f"{start_conf.fp}")
+            print(f"{filt_offset_funcs.shape[0]}")
+            raise Exception
+
+        # tp + fn = total pos
+        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
+            print(f"{start_conf.fp}")
+            print(f"{start_conf.fn}")
+            print(f"{filt_offset_funcs.shape[0]}")
+            raise Exception
+
+        # Check the predicted bounds for correctness
+        for row in filt_offset_funcs:
+            if np.any(np.all(row == gnd_matrix, axis=1)): 
+                bound_conf.tp+=1
+            else:
+                bound_conf.fp+=1
+
+        # Check to see how many false negative there were 
+        for row in gnd_matrix:
+            if not np.any(np.all(row == filt_offset_funcs, axis=1)):
+                bound_conf.fn+=1
+
+        total_bytes += gnd_truth.num_bytes
+
+        total_start_conf.tp += start_conf.tp
+        total_start_conf.fp += start_conf.fp
+        total_start_conf.fn += start_conf.fn
+
+        total_bound_conf.tp += bound_conf.tp
+        total_bound_conf.fp += bound_conf.fp
+        total_bound_conf.fn += bound_conf.fn
+
+        if verbose:
+            print(f"binary: {bin.name}")
+            print(f"Starts: {start_conf}")
+            print(f"Metrics: {calc_metrics(start_conf)}")
+            print(f"Bounds: {bound_conf}")
+            print(f"Metrics: {calc_metrics(bound_conf)}")
+
+    print(f"Total Metrics")
+    print(f"Starts: {calc_metrics(total_start_conf)}")
+    print(f"Bounds: {calc_metrics(total_bound_conf)}")
+
+    return 
+
+def read_ghid_npz(inp: Path)->np.ndarray:
+    '''
+    Read the ghid npz
+    '''
+    npz_file = np.load(inp)
+    return npz_file[list(npz_file.keys())[0]].astype(int)
 
 @app.command()
 def read_comparison_file(
@@ -653,36 +807,23 @@ def cli_test(
 
     return
 
+
 @app.command()
 def batch_test_ghidra_bounds(
         binary_dir: Annotated[str, typer.Argument()],
-        save_results_dir: Annotated[str,typer.Option()],
-        noanalysis: Annotated[bool, typer.Option()]=False,
+        output_dir: Annotated[str,typer.Argument()],
+        #noanalysis: Annotated[bool, typer.Option()]=False,
         strip_file: Annotated[bool,typer.Option()]=False,
-        show_running_res: Annotated[bool, typer.Option()]=False,
+        use_offset: Annotated[bool, typer.Option()]=True,
     ):
 
     # Create the pathlib objects 
     binary_dir_path = Path(binary_dir)
-    save_path = Path(save_results_dir)
+    save_path = Path(output_dir)
 
     # Make the save directory
     if not save_path.exists():
         save_path.mkdir()
-
-    # Decide the postfixes for the names
-    if strip_file:
-        strip_post = "STRIPPED"
-    else:
-        strip_post = "NONSTRIPPED"
-    if noanalysis:
-        analysis_post = "NOANALYSIS"
-    else:
-        analysis_post = "ANALYSIS"
-
-    tp = 0
-    fp = 0
-    fn = 0
 
     # Iteravte oover the binaries and run the test
     for bin in alive_it(list(binary_dir_path.glob('*'))):
@@ -691,34 +832,35 @@ def batch_test_ghidra_bounds(
             continue
 
         # Make the flags list 
-        if noanalysis:
-            flags = ["-noanalysis"]
-            #print("analysis OFF")
-        else:
-            #print("analysis ON")
-            flags = []
+        flags = []
+        #if noanalysis:
+        #    flags = ["-noanalysis"]
+        #else:
+        #    flags = []
 
-        # Run the ghidra compare
-        same, lief_only, ghid_only, runtime = test_lief_v_ghid_bounds(bin, 
-                                            flags, strip_file)
-        tp += len(same)
-        fn += len(lief_only)
-        fp += len(ghid_only)
+        func_len_array, runtime = get_ghid_bounds(bin, flags, use_offset, strip_file)
+        result_path = save_path.joinpath(f"{bin.name}")
+        save_raw_experiment(bin, runtime, func_len_array, result_path)
 
-        if show_running_res:
-            tot_bytes = len(lief_only) + len(same)
-            print(f"tp: {tp}")
-            print(f"fp: {fn}")
-            print(f"fn: {fp}")
-            print(f"Runtime: {runtime}")
-            print(f"Total bytes: {tot_bytes}")
-            print(f"Byte per second = {runtime/tot_bytes}")
 
-        # define the result path 
-        result_path = save_path / Path(f"{bin.name}_{strip_post}_{analysis_post}")
+        #tp += len(same)
+        #fn += len(lief_only)
+        #fp += len(ghid_only)
 
-        # Save the results
-        save_comparison(bin, strip_file, same, ghid_only, lief_only, noanalysis, result_path, runtime)
+        #if show_running_res:
+        #    tot_bytes = len(lief_only) + len(same)
+        #    print(f"tp: {tp}")
+        #    print(f"fp: {fn}")
+        #    print(f"fn: {fp}")
+        #    print(f"Runtime: {runtime}")
+        #    print(f"Total bytes: {tot_bytes}")
+        #    print(f"Byte per second = {runtime/tot_bytes}")
+
+        ## define the result path 
+        #result_path = save_path / Path(f"{bin.name}_{strip_post}_{analysis_post}")
+
+        ## Save the results
+        #save_comparison(bin, strip_file, same, ghid_only, lief_only, noanalysis, result_path, runtime)
 
     return
 
@@ -864,12 +1006,12 @@ def parse_for_bounds(inp):
         if "END FUNCTION LIST" in line:
             break
         if in_list:
-            if "FOUND_FUNC" in line:
-                line = line.split(',')
-                line = [x.strip() for x in line if x.strip() != "FOUND_FUNC"]
-                names.append(line[0])
-                addrs.append(int(line[1],16))
-                lengths.append(line[2])
+            if "RIPKIT_FOUND_FUNC" in line:
+                line = line.split('<RIPKIT_SEP>')
+                line = [x.strip() for x in line]
+                names.append(line[1])
+                addrs.append(int(line[2],16))
+                lengths.append(line[3])
         if "BEGIN FUNCTION LIST" in line:
             in_list = True
 
