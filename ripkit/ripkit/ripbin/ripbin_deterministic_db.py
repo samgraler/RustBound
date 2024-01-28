@@ -37,15 +37,11 @@ import json
 # to make gathering binaries faster, but then I have to 
 # worry about keeping the two insync
 
-
 from .ripbin_exceptions import RipbinRegistryError, RipbinAnalysisError, RipbinDbError, AnalysisExistsError
-
 from .analyzer_types import Compiler, RustcOptimization, ProgLang, FileType, GoOptimization, AnalysisType, Coptimization
-
 from .binary_analyzer import get_functions
 
 DB_PATH = Path("~/.ripbin/").expanduser().resolve()
-#RIPBIN_REG = DB_PATH.joinpath('ripped_bins_registry.csv')
 RIPBIN_BINS = DB_PATH.joinpath('ripped_bins')
 
 @dataclass 

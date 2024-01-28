@@ -4,34 +4,29 @@ storage of the file and it's analysis
 """
 import numpy as np
 import polars as pl
-
 from typing import List
-
-import sys
 from pathlib import Path
 import magic
 import pefile
 from elftools.elf.elffile import ELFFile
 from capstone import Cs, CS_ARCH_X86, CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_32, CS_MODE_64, CsInsn
-
-import pandas as pd
 from dataclasses import dataclass, asdict, fields
-from enum import Enum
 import warnings
-
 from typing import Tuple, Union, Generator
-
 import lief
-import sqlite3
-
-# TODO: Make cargo automation a package
-
 from .analyzer_types import FunctionInfo, binaryFileExecSectionOnly, \
                         FileType, ProgLang, ByteInfo, RustcOptimization,\
                         KnownByteInfo_verbose_sql, KnownByteInfo_verbose,\
                         RustcTarget, Compiler
-
 from alive_progress import alive_bar
+from .ripbin_exceptions import RipbinRegistryError, RipbinAnalysisError, RipbinDbError, AnalysisExistsError
+
+
+@dataclass
+class FoundFunctions():
+    addresses: np.ndarray
+    names: List[str]
+    lengths: np.ndarray
 
 
 @dataclass 
@@ -125,8 +120,6 @@ def save_every_byte_prob(data:np.ndarray, save_path:Path):
     '''
     if data.shape[1] != 2:
         raise Exception
-
-
     np.savez_compressed(save_path, data)
     return
 
@@ -161,10 +154,16 @@ def save_raw_experiment(bin: Path,
 
     # Make the sub directory
     sub_dir = base_path.joinpath(bin.name)
-    sub_dir.mkdir()
+    if not sub_dir.exists():
+        sub_dir.mkdir()
+    elif sub_dir.is_file():
+        raise Exception
 
     # Save the compressed matrix
     matrix_saved = sub_dir.joinpath(f"{bin.name}_result")
+    if matrix_saved.exists():
+        raise Exception
+
     save_func_start_and_length(funcs_and_length, matrix_saved)
 
     # Save the runtime

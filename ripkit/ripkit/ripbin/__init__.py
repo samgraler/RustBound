@@ -14,6 +14,7 @@ from ..bin_types import (
 )
 
 from .binary_analyzer import (
+    FoundFunctions,
     calc_metrics,
     ConfusionMatrix,
     lief_gnd_truth,
