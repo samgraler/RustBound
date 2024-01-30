@@ -7,6 +7,7 @@ import json
 from typing import List
 from typing_extensions import Annotated
 from fairseq.models.roberta import RobertaModel
+import torch
 import sys
 import lief 
 from elftools.elf.elffile import ELFFile
@@ -14,16 +15,15 @@ from dataclasses import dataclass
 from colorama import Fore, Back, Style
 import numpy as np
 from alive_progress import alive_it
-
-#from ../ripkit.ripkit.ripbin import (
-#    get_functions,
-#)
-
-
+from ripkit.ripbin import ( 
+    ConfusionMatrix,
+    calc_metrics,
+    save_raw_experiment_three_prob,
+    lief_gnd_truth,
+)
 import time
 import typer 
 import rich
-
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
@@ -190,6 +190,53 @@ def load_bin_for_xda_inp(path: Path):
         else:
             lbl = 'N'
         yield [str(byte), lbl]
+
+def xda_predict_raw(bin: Path, model) -> tuple[np.ndarray,float]:
+    '''
+    Predict all the bytes in the .text section of the binary model
+    '''
+    # Parse the bin 
+    parsed_bin = lief.parse(str(bin.resolve()))
+
+    #TODO: Get the text section contents
+    text_bytes = parsed_bin.get_section(".text").content
+
+    #TODO: Make sure contents are bytes wihtout 0x
+    text_bytes = [f"{get_hex_str(x)}" for x in text_bytes] 
+
+    STEP = 512
+    START = 1 
+    END = 2
+    total_time = 0
+
+    total_res = np.zeros((int(len(text_bytes)/STEP)+1 , 512,3))
+
+    loop_counter = 0
+    starts = 0
+    ends = 0
+    for i in alive_it(range(0, len(text_bytes)-STEP-1, STEP)):
+        loop_counter+=1
+
+        # Get the total chunnk, and the labeled chunk 
+        token_chunk = text_bytes[i:i+STEP]
+
+        # Make a sting of 512 tokens
+        encoded_tokens = model.encode(' '.join(token_chunk))
+
+        # Get the prediction
+        start = time.time()
+        logprobs = model.predict('funcbound', encoded_tokens)
+        total_time += time.time() - start
+
+        total_res[loop_counter] = logprobs.detach().numpy()
+
+        # The following line will decide what classification the byte is
+        predictions = logprobs.argmax(dim=2).view(-1).data
+        starts += np.count_nonzero(predictions == START)
+        ends += np.count_nonzero(predictions == END)
+    print(starts)
+    print(ends)
+    return total_res, total_time
 
 def xda_predict(inp_file: Path, model, out_file:Path = None):
 
@@ -608,6 +655,43 @@ def read_saved(path_in):
 
     return [tp,fp,tn,fn]
 
+
+
+#def save_raw_results(binary:Path, out_dir:Path, predictions: np.ndarray, runtime:float)->None:
+#    '''
+#    Save the results to a npz file and save the time to runtime.txt
+#
+#    Save path structure
+#    out_dir
+#    |
+#    | binary.name
+#    |     |
+#    |     | {binary.name_result}.npz
+#    |     | runtime.txt
+#    '''
+#
+#    if not out_dir.exists():
+#        out_dir.mkdir()
+#    elif out_dir.exists() and out_dir.is_file():
+#        raise Exception
+#
+#    # Make the new binary dir
+#    result_path = out_dir.joinpath(f"{binary.name}")
+#    if result_path.exists():
+#        raise Exception
+#    result_path.mkdir()
+#
+#    # Save the data 
+#    npz_file = result_path / f"{binary.name}_result.npz"
+#    np.savez_compressed(npz_file, predictions)
+#
+#    # save the runtime
+#    runtime_path = result_path / "runtime.txt"
+#    with open(runtime_path, 'w') as f:
+#        f.write(f"{runtime}")
+#
+#    return
+
 # TODO: Save results on a per file basis 
 def save_results_timed(res, out_file:Path):
     '''
@@ -801,6 +885,243 @@ def read_log(
 
 
     return
+
+@app.command()
+def raw_test(
+    bins: Annotated[str, typer.Argument()],
+    checkpoint_dir: Annotated[str, typer.Argument()],
+    checkpoint: Annotated[str, typer.Argument()],
+    result_path: Annotated[str, typer.Argument()],
+    ):
+    '''
+    Temp test to see how to save raw predictions in pbnz file
+    '''
+
+
+    res_path = Path(result_path)
+    if not res_path.exists():
+        res_path.mkdir()
+    elif res_path.is_file():
+        raise Exception
+
+    input_path = Path(bins)
+    if not input_path.exists():
+        print(f"Path {input_path} doesn't exist")
+        return
+    elif input_path.is_dir():
+        inp_bins =  list(input_path.rglob('*'))
+    else:
+        inp_bins = [input_path]
+
+    # Load our model
+    roberta = RobertaModel.from_pretrained(checkpoint_dir, 
+                                            checkpoint,
+                                            'data-bin/funcbound', 
+                                            user_dir='finetune_tasks')
+    roberta.eval()
+
+    for bin_path in inp_bins:
+        # Get the xda res  and save
+        res, runtime= xda_predict_raw(bin_path, roberta)
+        single_res_path = res_path.joinpath(f"{bin_path.name}")
+        save_raw_experiment_three_prob( bin_path, runtime, res, single_res_path)
+    return
+
+@app.command()
+def read_bounds_raw(
+    input_dir : Annotated[str,typer.Argument()],
+    bin_dir: Annotated[str, typer.Argument()],
+    verbose: Annotated[bool, typer.Option()] = False,
+    ):
+    '''
+    Read the input dir and compute results using the lief module
+    '''
+
+    input_path = Path(input_dir)
+    if not input_path.exists(): 
+        print(f"Inp dir {input_dir} is not a dir")
+        return
+
+    bin_path = Path(bin_dir)
+    if not bin_path.exists():
+        print(f"Bin dir {bin_dir} is not a dir")
+        return
+
+    if bin_path.is_file():
+        bins = [bin_path]
+    else:
+        bins = list(bin_path.glob('*'))
+
+    matching_files = {}
+    #for bin in bin_path.glob('*'):
+    for bin in bins:
+        matching = False
+        for res_file in input_path.rglob('*'):
+            if ".npz" not in res_file.name:
+                continue
+            if res_file.name.replace("_result.npz","") == bin.name:
+                matching_files[bin] = res_file
+                matching = True
+        if not matching:
+            print(f"Never found {bin.name}")
+
+
+    if len(matching_files.keys()) != len(bins):
+        msg = f"Found {len(matching_files.keys())}: {matching_files.keys()}"
+        print(f"{matching_files.keys()}")
+        print(f"Some bins don't have matching result file")
+        raise Exception(msg)
+
+
+    total_start_conf = ConfusionMatrix(0,0,0,0)
+    total_bound_conf = ConfusionMatrix(0,0,0,0)
+    total_end_conf = ConfusionMatrix(0,0,0,0)
+    total_bytes = 0
+
+    START = 1 
+    END = 2 
+
+    for bin in alive_it(list(matching_files.keys())):
+        # Init the confusion matrix for this bin
+        start_conf = ConfusionMatrix(0,0,0,0)
+        bound_conf = ConfusionMatrix(0,0,0,0)
+        end_conf = ConfusionMatrix(0,0,0,0)
+
+
+        # 1  - Ground truth for bin file, this time the matrix will be...
+        #           | start addr | end addr | 
+        #   where end addr is the address of the final byte that is in the function
+        #   end_addr = start_addr + length - 1
+
+        #  0x01  mov 
+        #  0x02  pop
+        #  0x03  ret
+        # start = 1 
+        # len = 3
+        # end = 3
+
+        gnd_truth = lief_gnd_truth(bin.resolve())
+        # NOTICE: IMPORTANT... xda seems to the first byte outside of the function 
+        #               as the end of the function 
+        lengths_adjusted = gnd_truth.func_lens
+        ends = gnd_truth.func_addrs + lengths_adjusted
+        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+                                    ends.T.reshape(-1,1)), axis=1)
+        #gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+        #                            gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+
+        # 2 - Find the npz with the xda funcs and addrs, chop of functions that 
+        #     are out-of-bounds of the lief functions (these are functions that are
+        #       likely outside of the .text section)
+        xda_funcs = read_xda_npz(matching_files[bin])
+        predictions = torch.Tensor(xda_funcs).argmax(dim=2).view(-1).data #.numpy()
+        start_indices = np.where(predictions == START)[0]
+        end_indices = np.where(predictions == END)[0]
+
+        # 3 - Get the address of the first byte in the .text section and add this
+        #     to all the function bound indices
+        parsed_bin = lief.parse(str(bin.resolve()))
+        text_section_virt_addr = parsed_bin.get_section(".text").virtual_address
+        text_section_start = parsed_bin.imagebase + text_section_virt_addr
+
+        xda_starts = start_indices + text_section_start - 512
+        xda_ends = end_indices + text_section_start - 512
+
+        # 4 - Compare the two lists
+        # Get all the start addrs that are in both, in ida only, in gnd_trush only
+        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], xda_starts))
+        start_conf.fp=len(np.setdiff1d( xda_starts, gnd_matrix[:,0] ))
+        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], xda_starts))
+
+        # 5 - Compare the ends
+        end_conf.tp=len(np.intersect1d(gnd_matrix[:,1], xda_ends))
+        end_conf.fp=len(np.setdiff1d( xda_ends, gnd_matrix[:,1] ))
+        end_conf.fn=len(np.setdiff1d(gnd_matrix[:,1], xda_ends))
+
+
+        # Create tuple of the starts to the ends 
+        if len(xda_starts) == len(xda_ends):
+            xda_bounds = np.concatenate((xda_starts.T.reshape(-1,1), xda_ends.T.reshape(-1,1)),axis=1)
+        else:
+            max_length = max(len(xda_starts), len(xda_ends))
+            padded_xda_starts = np.pad(xda_starts, (0, max_length - len(xda_starts)), mode='constant')
+            padded_xda_ends= np.pad(xda_ends, (0, max_length - len(xda_ends)), mode='constant')
+            xda_bounds = np.concatenate((padded_xda_starts.T.reshape(-1,1), padded_xda_ends.T.reshape(-1,1)),axis=1)
+            print("Warning, don't not have the same number of starts and ends")
+
+
+        # 6 - Compare the ends
+        bound_conf.tp=len(np.intersect1d(gnd_matrix, xda_bounds))
+        bound_conf.fp=len(np.setdiff1d( xda_bounds, gnd_matrix ))
+        bound_conf.fn=len(np.setdiff1d(gnd_matrix, xda_bounds))
+
+
+        debug = True
+        if debug:
+            max_length = max(len(xda_starts), len(xda_ends))
+            padded_xda_starts = np.pad(xda_starts, (0, max_length - len(xda_starts)), mode='constant')
+            padded_xda_ends= np.pad(xda_ends, (0, max_length - len(xda_ends)), mode='constant')
+            padded_xda_bounds = np.concatenate((padded_xda_starts.T.reshape(-1,1), padded_xda_ends.T.reshape(-1,1)),axis=1)
+            with open("XDA_FUNCS_BOUND",'w') as f:
+                for row in padded_xda_bounds:
+                    f.write(f"{row}\n")
+            with open("GND_MATRIX",'w') as f:
+                for row in gnd_matrix:
+                    f.write(f"{row}\n")
+
+        # tp + fp = Total predicted
+        if not start_conf.tp + start_conf.fp == xda_starts.shape[0]:
+            print(f"start TP: {start_conf.tp}")
+            print(f"start FP: {start_conf.fp}")
+            print(f"Xda starts: {xda_starts.shape}")
+            print(f"gnd matrix {gnd_matrix.shape[0]}")
+            return
+
+        # tp + fn = total pos
+        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
+            print(f"{start_conf.fp}")
+            print(f"{start_conf.fn}")
+            print(f"{gnd_matrix.shape[0]}")
+            print(f"start total: {xda_starts.shape}")
+            print(f"gnd matrix {gnd_matrix.shape[0]}")
+            return
+
+        total_bytes += gnd_truth.num_bytes
+
+        total_start_conf.tp += start_conf.tp
+        total_start_conf.fp += start_conf.fp
+        total_start_conf.fn += start_conf.fn
+
+        total_bound_conf.tp += bound_conf.tp
+        total_bound_conf.fp += bound_conf.fp
+        total_bound_conf.fn += bound_conf.fn
+
+        total_end_conf.tp += end_conf.tp
+        total_end_conf.fp += end_conf.fp
+        total_end_conf.fn += end_conf.fn
+
+        if verbose:
+            print(f"binary: {bin.name}")
+            print(f"Starts: {start_conf}")
+            print(f"Starts Metrics: {calc_metrics(start_conf)}")
+            print(f"Ends Metrics: {calc_metrics(start_conf)}")
+            print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
+    print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
+    print(f"Ends Metrics: {calc_metrics(total_end_conf)}")
+    print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
+    return 
+
+
+
+
+def read_xda_npz(inp: Path)->np.ndarray:
+    '''
+    Read the ida npz
+    '''
+    npz_file = np.load(inp)
+    return npz_file[list(npz_file.keys())[0]]
+
+
 
 @app.command()
 def test(
