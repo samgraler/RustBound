@@ -23,7 +23,7 @@ from .ripbin_exceptions import RipbinRegistryError, RipbinAnalysisError, RipbinD
 
 
 @dataclass
-class FoundFunctions():
+class FoundFunctions:
     addresses: np.ndarray
     names: List[str]
     lengths: np.ndarray
@@ -53,6 +53,9 @@ def calc_metrics(inp: ConfusionMatrix)->Metrics:
     '''
     Return F1, prec, and recall
     '''
+    if inp.tp == 0:
+        return Metrics(0,0,0)
+
     prec = inp.tp / (inp.tp + inp.fp)
     recall = inp.tp / (inp.tp + inp.fn)
     f1 = 2 * ((prec*recall)/(prec+recall))
@@ -128,11 +131,50 @@ def save_three_class_byte_prob(data:np.ndarray, save_path:Path):
     The ndarray has:
         | byte_val: int | prob class1 | prob class2 | prob class 3|
     '''
-    if data.shape[1] != 4:
+    if data.shape[2] != 3:
         raise Exception
 
     np.savez_compressed(save_path, data)
     return
+
+def save_raw_experiment_three_prob(bin: Path,
+                        runtime: float, 
+                        result_matrix: np.ndarray, 
+                        base_path:Path):
+    '''
+    Save numpy data and other info
+
+    base_path: Path
+        Directory to save the experiment. Each experiment will make a new 
+        directory in base_path that will have info.txt and {bin.name}_result.npz
+    '''
+
+    # Check that the dir exists, and is not a file 
+    if base_path.exists() and base_path.is_file():
+        raise Exception
+    elif not base_path.exists():
+        base_path.mkdir()
+
+    # Make the sub directory
+    sub_dir = base_path.joinpath(bin.name)
+    if not sub_dir.exists():
+        sub_dir.mkdir()
+    elif sub_dir.is_file():
+        raise Exception
+
+    # Save the compressed matrix
+    matrix_saved = sub_dir.joinpath(f"{bin.name}_result")
+    if matrix_saved.exists():
+        raise Exception
+    save_three_class_byte_prob(result_matrix, matrix_saved)
+
+    # Save the runtime
+    runtime_file = sub_dir.joinpath("runtime.txt")
+    with open(runtime_file, 'w') as f:
+        f.write(f"{runtime}")
+    return
+
+
 
 def save_raw_experiment(bin: Path,
                         runtime: float, 
@@ -175,7 +217,7 @@ def save_raw_experiment(bin: Path,
 
 
 
-def generate_features(path: Path, minimum_func_length, one_hot=True, label_functions=True):
+def generate_features(path: Path, minimum_func_length, one_hot=True, label_functions=True)->Generator[np.ndarray,None,None]:
     '''
     Generate npz for given binary
     '''
@@ -643,7 +685,7 @@ def pretty_elf_analyze_functions(path: Path)-> None:
 
 
 
-def generate_minimal_labeled_features(path: Path, use_one_hot=True):
+def generate_minimal_labeled_features(path: Path, use_one_hot=True)->Generator[np.ndarray,None,None]:
     '''
     Generate npy matrix with vectors:
         <isStart, isMiddle, isEnd, byte>
@@ -686,7 +728,7 @@ def generate_minimal_labeled_features(path: Path, use_one_hot=True):
 
 
 def generate_minimal_unlabeled_features(path: Path, use_one_hot=True, 
-                                        disp_bar=False):
+                                        disp_bar=False)->Generator[np.ndarray,None,None]:
     '''
     Generate npy matrix with vectors:
         <addr, byte, >

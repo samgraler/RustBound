@@ -1,13 +1,3 @@
-# Need to import binary_analyzer.py 
-# analyzer_types
-
-#import analyzer_types
-#import binary_analyzer
-
-#from .ripbin_db import (.to(x.device)
-#)
-
-
 from ..bin_types import (
     RegBit,
     FileFormat
@@ -22,6 +12,7 @@ from .binary_analyzer import (
     save_func_start_and_length,
     save_every_byte_prob,
     save_three_class_byte_prob,
+    save_raw_experiment_three_prob,
     generate_features,
     generate_minimal_labeled_features,
     generate_minimal_unlabeled_features,
@@ -45,7 +36,6 @@ from .ripbin_deterministic_db import (
 #    get_registry,
 #    save_and_register_analysis,
 #)
-
 from .analyzer_types import (
     AnalysisType,
     FileType,
@@ -54,4 +44,12 @@ from .analyzer_types import (
     RustcOptimization,
     GoOptimization,
     Coptimization,
+)
+
+from .cli_utils import (
+    new_file_super_careful_callback,
+    new_file_callback,
+    must_be_file_callback,
+    iterable_path_shallow_callback,
+    iterable_path_deep_callback,
 )

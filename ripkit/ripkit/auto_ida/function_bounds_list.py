@@ -1,14 +1,8 @@
-
-
 import idc
 import idaapi 
 import idautils
 import ida_ida
 import ida_funcs
-
-#print("Hello")
-
-# Could log to an external log file 
 
 res = idaapi.auto_wait()
 print(f"Auto wait res {res}")
@@ -43,10 +37,13 @@ end = ida_ida.inf_get_max_ea()
 
 #for (start_ea, end_ea) in idautils.Chunks(start,end):
 #for (start_ea, end_ea) in idautils.Chunks(start):
+print("FUNCTION_START_IND_RIPKIT")
+
 for start_ea in idautils.Functions():
     count+=1
     #print("{}, {}".format(ea, idc.get_func_name(ea)))
-    print(f"FUNCTION, {start_ea}, {ida_funcs.calc_func_size(start_ea)}, {idc.get_func_name(start_ea)}")
+    print(f"RIPKIT_FUNCTION<RIP_SEP>{start_ea}<RIP_SEP>{ida_funcs.calc_func_size(start_ea)}<RIP_SEP>{idc.get_func_name(start_ea)}")
 print("FUNCTIONS count :" + str(count))
 
+print("FUNCTION_END_IND_RIPKIT")
 qexit(0)

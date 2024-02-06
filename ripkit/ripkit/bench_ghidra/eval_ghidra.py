@@ -467,8 +467,8 @@ def read_bounds_raw(
         offset_funcs[:,0] += offset
 
         # 4 - Mask the array so we only include bytes in .text
-        mask = ((ghid_funcs[:,0] < np.max(gnd_truth.func_addrs)) & 
-                    ghid_funcs[:,0] > np.min(gnd_truth.func_addrs))
+        mask = ((ghid_funcs[:,0] <= np.max(gnd_truth.func_addrs)) & 
+                    ghid_funcs[:,0] >= np.min(gnd_truth.func_addrs))
         filt_ghid_funcs= ghid_funcs[mask]
 
         mask = ((offset_funcs[:,0]  < np.max(gnd_truth.func_addrs)) & 
