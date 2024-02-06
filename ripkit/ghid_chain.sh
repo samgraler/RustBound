@@ -1,0 +1,9 @@
+python ripkit/main.py ghidra test-bounds ../datasets/20_file_subset/1_subset/ SMALL_GHID_RESULTS/O1_results 
+python ripkit/main.py ghidra test-bounds ../datasets/20_file_subset/2_subset/ SMALL_GHID_RESULTS/O2_results 
+python ripkit/main.py ghidra test-bounds ../datasets/20_file_subset/3_subset/ SMALL_GHID_RESULTS/O3_results 
+python ripkit/main.py ghidra test-bounds ../datasets/20_file_subset/z_subset/ SMALL_GHID_RESULTS/OZ_results 
+python ripkit/main.py ghidra test-bounds ../datasets/large_dataset/0_xda_tested/ LARGE_GHID_RESULTS/O0_results 
+python ripkit/main.py ghidra test-bounds ../datasets/large_dataset/1_xda_tested/ LARGE_GHID_RESULTS/O1_results 
+python ripkit/main.py ghidra test-bounds ../datasets/large_dataset/2_xda_tested/ LARGE_GHID_RESULTS/O2_results 
+python ripkit/main.py ghidra test-bounds ../datasets/large_dataset/3_xda_tested/ LARGE_GHID_RESULTS/O3_results 
+python ripkit/main.py ghidra test-bounds ../datasets/large_dataset/z_xda_tested/ LARGE_GHID_RESULTS/OZ_results 
