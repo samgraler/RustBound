@@ -3,6 +3,8 @@
     that window of bytes as a function start or not
 '''
 import lief
+import hashlib
+import math
 import shutil
 import subprocess
 import os
@@ -16,25 +18,15 @@ from torchmetrics.classification import (
     BinaryF1Score, BinaryPrecision, BinaryRecall,
 )
 import sys
-#import matplotlib.pyplot as plt
-
-#from model_runner import log_model, save_json_receipt
-
 import random
-#import polars as pl
-
-from typing import Optional, Tuple
-
 import torch 
 import numpy as np
-#import logging
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from alive_progress import alive_bar, alive_it
 from torchinfo import summary
-#from torchviz import make_dot
 import typer
 from rich.console import Console
 from typing_extensions import Annotated
@@ -47,14 +39,18 @@ import multiprocessing
 CPU_COUNT = multiprocessing.cpu_count()
 
 from ripkit.ripbin import (
+    ConfusionMatrix,
+    lief_gnd_truth,
     get_functions,
     generate_minimal_labeled_features,
+    generate_features,
+    #get_functions,
+    #new_file_super_careful_callback,
+    new_file_callback,
+    #must_be_file_callback,
+    iterable_path_shallow_callback,
+    iterable_path_deep_callback,
 )
-#from ripbin import (
-#    get_registry, AnalysisType, ProgLang,
-#    generate_minimal_unlabeled_features,
-#    POLARS_generate_minimal_unlabeled_features,
-#    )
 
 import lightning.pytorch as pylight
 
@@ -146,6 +142,13 @@ class lit(pylight.LightningModule):
     def configure_optimizers(self)->optim.Optimizer:
         optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
         return optimizer
+
+    def predict_step(self, batch, batch_idx)->STEP_OUTPUT:
+
+        inp_batch, target = batch
+
+        out_tensor = self.classifier(inp_batch)
+        return out_tensor
 
     def test_step(self, batch, batch_idx)->STEP_OUTPUT:
         # Trianing loop
@@ -294,8 +297,6 @@ def gen_one_hot_dataset_ENDS(files: list[Path], num_chunks):
 
 def gen_one_hot_dataset(files: list[Path], num_chunks):
 
-    # TODO: Is bool more effecient?
-    # BUG: Maybe - when I switch to np.bool_ the performance 
     #       drops DRASTICALLY
     inp_array = np.empty((num_chunks,1000,255), dtype=np.float64)
     label_arr = np.empty((num_chunks,1000, 1), dtype=np.float64)
@@ -344,6 +345,7 @@ def gen_one_hot_dataset(files: list[Path], num_chunks):
                     # the next loop iteration
                     if npz_file_data.shape[0] >= 1001:
                         good_file = True
+                    else:
                         print(f"File {selected_file} too short")
                         break
 
@@ -380,7 +382,68 @@ def gen_one_hot_dataset(files: list[Path], num_chunks):
 
     return inp_array, label_arr
 
+def chunk_generator(inp_array, lbl_array, num_chunks, labeled_data, ends:bool):
+    '''
 
+    Lazily yield the the chunks of data so I don't blow up anythings memory
+    '''
+    for i in range(num_chunks):
+        # Get chunk data
+        chunk_data = labeled_data[i:i+1000,3:]
+        inp_array[i] = chunk_data
+        if ends:
+            #lbl_array[i] = labeled_data[i:i+1000,2].reshape((1000,1))
+            yield chunk_data, labeled_data[i:i+1000,2].reshape((1000,1))
+        else:
+            #lbl_array[i]= labeled_data[i:i+1000,0].reshape((1000,1))
+            yield chunk_data, labeled_data[i:i+1000,0].reshape((1000,1))
+
+
+
+def single_bin_dataloader(
+        input_bin:Path,
+        min_func_len: int,
+        batch_size: int,
+        ends=False,
+    ):
+    '''
+    Create a dataloader for test files input
+    '''
+
+    labeled_data = np.array(list(generate_features(input_bin, min_func_len)))
+
+    # Need to chunk the bin into 1000,1 arrays 
+    # This will result in a shape of (len(labeled_data)/1000 , 1000, 1 ) shape
+    num_chunks = math.floor(labeled_data.shape[0] / 1000)
+    extra_chunks = labeled_data.shape[0] - (num_chunks*1000)
+    labeled_data = labeled_data[:-extra_chunks]
+
+    print(f"Using {num_chunks} of 1000 for {labeled_data.shape[0]} bytes")
+    print(f"We are then lossing{labeled_data.shape[0] - num_chunks*1000} bytes")
+
+    inp_array = np.empty((num_chunks,1000,255), dtype=np.float64)
+    lbl_array = np.empty((num_chunks,1000,1), dtype=np.float64)
+
+    for i in range(num_chunks):
+        # Get chunk data
+        chunk_data = labeled_data[i:i+1000,3:]
+        inp_array[i] = chunk_data
+
+        if ends:
+            lbl_array[i] = labeled_data[i:i+1000,2].reshape((1000,1))
+        else:
+            lbl_array[i]= labeled_data[i:i+1000,0].reshape((1000,1))
+
+
+    #test_dataset = MyDataset(torch.Tensor(inp_array).to(DEVICE), 
+    #                 torch.Tensor(lbl_array).squeeze().to(DEVICE))
+    test_dataset = MyDataset(torch.Tensor(inp_array), 
+                     torch.Tensor(lbl_array).squeeze())
+
+    test_dataloader = DataLoader(test_dataset, batch_size=16, 
+                                shuffle=False,
+                                drop_last=True) #, num_workers=CPU_COUNT)
+    return test_dataloader
 
 def create_dataloaders(
         input_files,
@@ -438,148 +501,6 @@ def create_dataloaders(
 
     return train_dataloader, valid_dataloader, test_dataloader
 
-@app.command()
-def rust_train_model(
-        opt_lvl: Annotated[str, typer.Argument(
-                    help="Opt level to train model on")] = 'O0',
-        lr: Annotated[str, typer.Option(
-                    help="learning rate to use")] = '0.0005',
-        ends: Annotated[bool, typer.Option(
-                    help="learning rate to use")] = False,
-    
-        starts: Annotated[bool, typer.Option(
-                    help="learning rate to use")] = False,
-        ):
-
-    if opt_lvl not in ['all', 'O0', 'O1', 'O2', 'O3']:
-        print(f"Opt lvl {opt_lvl} is unknown")
-        return
-
-    # Get the opt levels
-    opt_lvls = [opt_lvl] if opt_lvl != 'all' else ['O0', 'O1', 'O2', 'O3']
-
-    # Get the results
-    if (not starts) and (not ends):
-        total_results = [(opt, rust_train_model_helper(opt,float(lr),
-                                ends=True),'ends') for opt in opt_lvls]
-        total_results.extend([(opt, 
-                            rust_train_model_helper(opt,float(lr),
-                            ends=False),'starts') for opt in opt_lvls])
-    elif ends:
-        total_results = [(opt, rust_train_model_helper(opt,float(lr),
-                                ends=True),'ends') for opt in opt_lvls]
-    else:
-        total_results = [(opt, rust_train_model_helper(opt,float(lr),
-                                ends=False),'ends') for opt in opt_lvls]
-
-
-    for opt, res, detect_type in total_results:
-        print(f"TRAINING SUMMARY with {opt} {detect_type}")
-        print("======================================")
-        print(f"  Had {len(res[0])} rust files to use")
-        print(f"  Learn Rate: {lr}")
-        print(f"  TrainLoader {len(res[-2][0])}")
-        print(f"  ValidLoader {len(res[-2][1])}")
-        print(f"  TestLoader {len(res[-2][2])}")
-        for metric in res[2]:
-            print(f"    {type(metric).__name__} : {metric.compute()}")
-    return 
-
-
-def onehot_to_byte(onehot_list: list):
-
-
-    # THe index of the byte is one less than its decimal value 
-    if 1 not in onehot_list:
-        return 0
-
-    return onehot_list.index(1) + 1
-
-
-@app.command()
-def new_detect(
-        file: Annotated[str, typer.Argument(help='Input binay')],
-        opt_lvl: Annotated[str, typer.Argument(help='Opt lvl')],
-        start: Annotated[bool, typer.Option(
-                    help="Detect Start Bounds")] = True,
-        use_cache_model: Annotated[bool, typer.Option(
-                    help="Used the chached mode")] = True,
-    ):
-
-
-    if opt_lvl not in ['O0', 'O1', 'O2', 'O3']:
-        print(f"Opt lvl {opt_lvl} is unknown")
-        return
-
-
-    if start:
-        MODEL_F_NAME = Path(f"MODEL_{opt_lvl}_start")
-    else:
-        MODEL_F_NAME = Path(f"MODEL_{opt_lvl}_end")
-
-    print(f"Generating model and dataset")
-    if (not use_cache_model and not start) or not MODEL_F_NAME.exists():
-        rust_files, losses, results, loaders, \
-            model  = rust_train_model_helper(opt_lvl,'0.0005', ends=True)
-        torch.save(model,MODEL_F_NAME)
-    elif (not use_cache_model and start) or not MODEL_F_NAME.exists():
-        rust_files, losses, results, loaders, \
-            model  = rust_train_model_helper(opt_lvl,'0.0005', ends=False)
-        torch.save(model,MODEL_F_NAME)
-    elif MODEL_F_NAME.exists():
-        model = torch.load(MODEL_F_NAME)
-    else:
-        print("Error")
-        return
-
-    summary(model)
-
-    cached_file= Path(f".cache_for_{file}.npz").resolve()
-
-    if not cached_file.exists():
-        print("Generating npz data")
-        data = generate_minimal_unlabeled_features(Path(file), use_one_hot=True)
-        np.savez(cached_file,np.array(list(data)))
-    else:
-        print("Loading npz data")
-        data = np.load(cached_file,mmap_mode='r', allow_pickle=True)
-        data = data[data.files[0]]
-
-    # Now data is a generator, 
-
-    threshold = .9
-
-    print("Labeling addrs...")
-    for i in alive_it(range(0,data.shape[0]-1000, 1000), title="LabelingFunctions"):
-        # Get 1000 chunks from the generator 
-
-        # The yielded array has address, *byte
-        # Ignore the address
-        addrs = data[i:i+1000,0].transpose().reshape(-1,1)
-
-        # Get the chunk
-        chunk = data[i:i+1000,1:]
-        #print(f"Chunk shape {chunk.shape}")
-
-        # Pass the chunk to the model 
-        inp = torch.Tensor(chunk).unsqueeze(0).to(DEVICE)
-        pred_label = model(inp)
-        lbls = torch.where(pred_label >= threshold, 
-                    torch.tensor(1), torch.tensor(0)).cpu().numpy().transpose()
-
-
-        byte_lbl_addrs = np.hstack((addrs,lbls,chunk))
-        #print(f"lbl addrs shape {byte_lbl_addrs.shape}")
-
-        starts = byte_lbl_addrs[byte_lbl_addrs[:,1]==1]
-
-        #print(addrs[lbls==1])
-        if np.count_nonzero(lbls == 1) >= 1:
-            for start in starts:
-                #print(f"Shape of start {start.shape}")
-                #exit(1)
-                print(f"0x{hex(start[0])}|, 0x{hex(onehot_to_byte(list(start[3:])))}")
-
 
 def lit_model_train(input_files, 
                     cache_file = Path(".DEFAULT_CACHE"),
@@ -627,66 +548,21 @@ def lit_model_train(input_files,
 
     return classifier.metrics, classifier
 
-def cli_main():
 
-
-    print("cli main")
-    learning_rate =  0.0005
-
-    input_size=255
-    hidden_size=16
-    layers=1
-
-    opt_lvl = 'O0'
-    # Get the registry of available analyzed files
-    reg = get_registry()
-
-    print("Got the registry")
-
-    files = reg[reg['analysis_type'] == AnalysisType.ONEHOT_PLUS_FUNC_LABELS.value]
-    files = files[files['prog_lang'] == ProgLang.RUST.value]
-    files = files[files['opt_level'] == opt_lvl]
-
-    # List of analysis file paths 
-    input_files = files['analysis_path'].to_list()
-
-    cache_file = Path(".lit_cache_dataset.npz")
-
-    # Init the model
-    model = recreatedModel(input_size, hidden_size, layers)
-
-    # Binary cross entrophy loss
-    loss_func = nn.BCELoss()
-
-    classifier = lit(model, loss_func, learning_rate)
-
-    train_loader, valid_loader, test_loader = create_dataloaders(
-            input_files, cache_file=cache_file,ends=False)
-
-
-    trainer = pylight.Trainer(max_epochs=100)
-
-    cli = LightningCLI(classifier)
-
-
-
-
-#TODO: Way to test on a large dataset without having to load it all into
-# memory before running the test
-def large_test():
+def rnn_predict_raw(model, unstripped_bin:Path, min_func_len:int):
     '''
+    Use the model to predict for the passed binary 
     '''
 
-    # The trainer takes a dataloader as a parameter
-    # So loop over all the files, create the dataloader 
-    # and run the test 
+    # 1. Create dataloader for the single binary 
+    bin_dataloader = single_bin_dataloader(unstripped_bin, min_func_len, batch_size=16)
 
-    # Theory 1: 
-    #   - Use small dataloader 
+    # 2. Use the model to predict
+    trainer = pylight.Trainer(precision="16-mixed")
+    res = trainer.predict(model,dataloaders=bin_dataloader)
+    res = [x.detach().cpu() for x in res]
 
-
-    return
-
+    return res
 
 def rnn_predict(model, unstripped_bin, threshold: float):
     # the rnn can predict chunks of 1000 bytes 
@@ -703,6 +579,8 @@ def rnn_predict(model, unstripped_bin, threshold: float):
     # Recored start time
     start = time.time()
 
+    #for row in data_gen:
+    # each row is: Start?, Middle?, End?, one_hot_byte
     for row in data_gen:
         # Index | meaning
         # 0     | is_start
@@ -767,9 +645,10 @@ def gen_unified_train(
         return
 
     # Train on these files
-    metrics, classifier = lit_model_train(train_files)
-    print([x.compute() for x in metrics])
-
+    metrics_starts, classifier_starts = lit_model_train(train_files)
+    print([x.compute() for x in metrics_starts])
+    metrics_ends, classifier_ends = lit_model_train(train_files, ends=True)
+    print([x.compute() for x in metrics_ends])
     return
 
 
@@ -835,81 +714,88 @@ def train_on(
 
     # Get the files from the input path
     #train_files = [f"{x." for x  in Path(inp_dir).rglob('*') ]
-    train_files = list(Path(inp_dir).rglob('*'))
+    train_files = [ x for x in Path(inp_dir).rglob('*') if x.is_file()]
 
     # Train files must be the npz version of the files...
 
 
     # Train on these files
     metrics, classifier = lit_model_train(train_files)
+    print(f"Starts: ")
+    print([x.compute() for x in metrics])
+    print(f"Ends: ")
+    metrics_ends, classifier_ends = lit_model_train(train_files,ends=True)
     print([x.compute() for x in metrics])
     return
 
 
-@app.command()
-def train_on_first(
-        opt_lvl: Annotated[str, typer.Argument(
-                        help='Directory of bins to test on')],
-
-        num_bins: Annotated[int, typer.Argument(
-                        help='Num bins to test on')],
-    ):
-
-    opts = ['O0','O1','O2','O3','Z','S']
-
-    # TODO: verify this is how Oz and Os are lbls
-    if opt_lvl not in opts:
-        print(f"opt lbl must be in {opts}")
-        return
-
-    ##TODO: This is best used when I have large similar datasets for O0-Oz
-    ##       until I have all of those compiled I will manually split
-    ##with open("TEST_BIN_NAME_SET.json", 'r') as f:
-    ##    bin_names = json.load(f)['names']
-
-    ## 
-    rust_files = []
-
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        info_file = parent / 'info.json'
-        info = {}
-        try:
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
-
-
-        if info['optimization'].upper() in opt_lvl.upper():
-
-            bin_file  =  parent / info['binary_name']
-            if bin_file.exists():
-                rust_files.append(bin_file)
-
-    # Get the first x files
-    if len(rust_files) < num_bins:
-        print(f"Num bins too low {rust_files}")
-        return
-
-    # Get the first x files
-    first_x_files = rust_files[0:num_bins]
-
-    with open(f"TRAINED_FILESET_{opt_lvl}.txt", 'w') as f:
-        f.write("\n".join(x.name for x in first_x_files))
-        
-
-    # Train on these files
-    metrics, classifier = lit_model_train(first_x_files)
-    print([x.compute() for x in metrics])
-
-    return
+#@app.command()
+#def train_on_first(
+#        opt_lvl: Annotated[str, typer.Argument(
+#                        help='Directory of bins to test on')],
+#
+#        num_bins: Annotated[int, typer.Argument(
+#                        help='Num bins to test on')],
+#        ends: Annotated[bool, typer.Option(
+#                        help='Num bins to test on')]=False,
+#    ):
+#
+#    opts = ['O0','O1','O2','O3','Z','S']
+#
+#    # TODO: verify this is how Oz and Os are lbls
+#    if opt_lvl not in opts:
+#        print(f"opt lbl must be in {opts}")
+#        return
+#
+#    ##TODO: This is best used when I have large similar datasets for O0-Oz
+#    ##       until I have all of those compiled I will manually split
+#    ##with open("TEST_BIN_NAME_SET.json", 'r') as f:
+#    ##    bin_names = json.load(f)['names']
+#
+#    ## 
+#    rust_files = []
+#
+#    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#        info_file = parent / 'info.json'
+#        info = {}
+#        try:
+#            with open(info_file, 'r') as f:
+#                info = json.load(f)
+#        except FileNotFoundError:
+#            print(f"File not found: {info_file}")
+#            continue
+#        except json.JSONDecodeError as e:
+#            print(f"JSON decoding error: {e}")
+#            continue
+#        except Exception as e:
+#            print(f"An error occurred: {e}")
+#            continue
+#
+#
+#        if info['optimization'].upper() in opt_lvl.upper():
+#
+#            npz_file =  parent / 'one_hot_plus_func_labels.npz'
+#
+#            if npz_file.exists():
+#                rust_files.append(npz_file)
+#
+#    # Get the first x files
+#    if len(rust_files) < num_bins:
+#        print(f"Num bins too low {rust_files}")
+#        return
+#
+#    # Get the first x files
+#    first_x_files = rust_files[0:num_bins]
+#
+#    with open(f"TRAINED_FILESET_{opt_lvl}.txt", 'w') as f:
+#        f.write("\n".join(x.name for x in first_x_files))
+#        
+#
+#    # Train on these files
+#    metrics, classifier = lit_model_train(first_x_files, ends=ends)
+#    print([x.compute() for x in metrics])
+#
+#    return
 
 
 @app.command()
@@ -981,72 +867,73 @@ def train_without(
     #print(f"The len of test files was {len(rust_test_files)}")
     return
 
-@app.command()
-def read_results(
-        file: Annotated[str, typer.Argument(
-                        help='json file of results')],
-    ):
-
-    # Create a path object for the file
-    file_path = Path(file)
-
-    # If the file doesn't exist return error
-    if not file_path.exists():
-        print(f"File {file} does not exist")
-        return
-
-    # Load the json file
-    with open(file, 'r') as f:
-        data = json.load(f)
-        # Data is made of 
-        #{
-        #    '<bin_name>' : {'tp' : ,
-        #                     'fp' : ,
-        #                     'tn' : ,
-        #                     'fn' : ,
-        #                    }
-        #}
-
-    # Sum all the confusion matrix values 
-    tp = sum(x['tp'] for x in data.values())
-    fp = sum(x['fp'] for x in data.values())
-    tn = sum(x['tn'] for x in data.values())
-    fn = sum(x['fn'] for x in data.values())
-    runtime = sum(x['runtime'] for x in data.values())
-    tot_file_size = sum(x['filesize'] for x in data.values())
-
-    # Recall 
-    recall = tp/ (tp + fn)
-
-    # Precision 
-    precision = tp / (tp + fp)
-
-    # F1
-    f1 = 2 * precision * recall / (precision+recall)
-
-    # File avg runtime
-    file_avg = runtime / len(data.values())
-
-    # Byte per second 
-    # TODO: This bps is per .text byte ...
-    #       talking with boyand this should change
-    bps = (tp+tn+fn+fp) / runtime
-
-    print(f"For {len(data.keys())} bins...")
-    print(f"TP : {tp}")
-    print(f"TN : {tn}")
-    print(f"FP : {fp}")
-    print(f"FN : {fn}")
-    print(f"F1 : {f1}")
-    print(f"Precision : {precision}")
-    print(f"Recall : {recall}")
-    print(f"Avg file time: {file_avg}")
-    print(f"BPS .text: {bps}")
-    print(f"BPS whole file: {tot_file_size/runtime}")
-    print(f"total file size: {tot_file_size}")
-
-
-    return
+#@app.command()
+#def read_results(
+#        file: Annotated[str, typer.Argument(
+#                        help='json file of results')],
+#    ):
+#
+#    # Create a path object for the file
+#    file_path = Path(file)
+#
+#    # If the file doesn't exist return error
+#    if not file_path.exists():
+#        print(f"File {file} does not exist")
+#        return
+#
+#    # Load the json file
+#    with open(file, 'r') as f:
+#        data = json.load(f)
+#        # Data is made of 
+#        #{
+#        #    '<bin_name>' : {'tp' : ,
+#        #                     'fp' : ,
+#        #                     'tn' : ,
+#        #                     'fn' : ,
+#        #                    }
+#        #}
+#
+#    # Sum all the confusion matrix values 
+#    tp = sum(x['tp'] for x in data.values())
+#    fp = sum(x['fp'] for x in data.values())
+#    tn = sum(x['tn'] for x in data.values())
+#    fn = sum(x['fn'] for x in data.values())
+#    runtime = sum(x['runtime'] for x in data.values())
+#    tot_file_size = sum(x['filesize'] for x in data.values())
+#
+#    # Recall 
+#    recall = tp/ (tp + fn)
+#
+#    # Precision 
+#    precision = tp / (tp + fp)
+#
+#    # F1
+#    f1 = 2 * precision * recall / (precision+recall)
+#
+#    # File avg runtime
+#    file_avg = runtime / len(data.values())
+#
+#    # Byte per second 
+#    # TODO: This bps is per .text byte ...
+#    #       talking with boyand this should change
+#    bps = (tp+tn+fn+fp) / runtime
+#
+#    print(f"For {len(data.keys())} bins...")
+#    print(f"TP : {tp}")
+#    print(f"TN : {tn}")
+#    print(f"FP : {fp}")
+#    print(f"FN : {fn}")
+#    print(f"F1 : {f1}")
+#    print(f"Precision : {precision}")
+#    print(f"Recall : {recall}")
+#    print(f"Avg file time: {file_avg}")
+#    print(f"BPS .text: {bps}")
+#    print(f"BPS whole file: {tot_file_size/runtime}")
+#
+#    print(f"total file size: {tot_file_size}")
+#
+#
+#    return
 
 
 def strip_file(bin_path:Path)->Path:
@@ -1066,83 +953,494 @@ def strip_file(bin_path:Path)->Path:
 
     return strip_bin 
 
+
+def save_raw_prediction(raw_res:np.ndarray, out_file):
+
+    #with open(out_file, 'w') as f:
+    np.savez(out_file, raw_res)
+    return
+
+
+def calculate_md5(file_path, buffer_size=8192):
+    '''
+    Get the hash of a file. This is helpful for storing binaries of the same 
+    names that were compiled with different flags / for different OSs 
+    '''
+
+    md5_hash = hashlib.md5()
+
+    # Open, read, and take hash of file iterating over the buffers until
+    # there's no more
+    with open(file_path, 'rb') as file:
+        buffer = file.read(buffer_size)
+        while buffer:
+            md5_hash.update(buffer)
+            buffer = file.read(buffer_size)
+
+    # Return the digest 
+    return md5_hash.hexdigest()
+
+
+def export_dataset_npzs(
+        bin_names_dir: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+        opt: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+    ):
+    """
+    a hopefully temporary funcrion to grab binaries from ripbin db given names of optimization levels
+    """
+
+
+    bins_path = Path(bin_names_dir)
+    if bins_path.is_dir():
+        bins = list(bins_path,rglob('*'))
+    elif bins_path.is_file():
+        bins = [bins_path]
+    else:
+        print(f"Bins parh does not exist")
+        return
+
+
+    for bin in alive_it(bins):
+        #hash the bin files
+        bin_hash = calcculate_md5(bin)
+
+        #look up the bin in ripkit
+
+
+        #for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+        #    info_file = parent / 'info.json'
+        #    info = {}
+        #    try:
+        #        with open(info_file, 'r') as f:
+        #            info = json.load(f)
+        #    except FileNotFoundError:
+        #        print(f"File not found: {info_file}")
+        #        continue
+        #    except json.JSONDecodeError as e:
+        #        print(f"JSON decoding error: {e}")
+        #        continue
+        #    except Exception as e:
+        #        print(f"An error occurred: {e}")
+        #        continue
+
+
+        if info['optimization'].upper() in OPTIMIZATION:
+            npz_file = parent / "onehot_plus_func_labels.npz"
+
+
+
+
+
+    return
+
 @app.command()
-def test_on(
+def raw_test_bounds(
+        testset_dir: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+        start_weights: Annotated[str, typer.Argument(
+                            help='Weight for start model')],
+        end_weights: Annotated[str, typer.Argument(
+                            help='Weights for end model')],
+        out_dir: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+        min_func_len: Annotated[int, typer.Option(
+                        help='Directory of bins to test on')]=1,
+    ):
+
+
+    out_path = Path(out_dir)
+
+    if not out_path.exists():
+        out_path.mkdir()
+    elif out_path.is_file():
+        print("Out path is a file")
+        return
+
+    test_path = Path(testset_dir)
+    if test_path.is_file():
+        files = [test_path]
+    else:
+        files = list(Path(testset_dir).glob('*'))
+
+    # Load the pytorch lightning model from the checkpoints
+    #start_birnn_model = lit.load_from_checkpoint(start_weights)
+    #end_birnn_model = lit.load_from_checkpoint(end_weights)
+
+    # Predict the starts and ends for the binaries
+    for bin in alive_it(files):
+        # Load the pytorch lightning model from the checkpoints
+        start_birnn_model = lit.load_from_checkpoint(start_weights)
+        start_raw_res = rnn_predict_raw(start_birnn_model, bin, 1)
+        stacked_start_res = np.hstack([arr.numpy().reshape(1, -1) for arr in start_raw_res])
+        save_raw_prediction(stacked_start_res, out_path.joinpath(bin.name + "_starts_result.npz"))
+        del stacked_start_res
+        del start_raw_res
+        torch.cuda.empty_cache()
+
+    for bin in alive_it(files):
+        end_birnn_model = lit.load_from_checkpoint(end_weights)
+        end_raw_res = rnn_predict_raw(end_birnn_model, bin, 1)
+        stacked_end_res = np.hstack([arr.numpy().reshape(1, -1) for arr in end_raw_res])
+        save_raw_prediction(stacked_end_res, out_path.joinpath(bin.name + "_ends_result.npz"))
+        del stacked_end_res
+        del end_raw_res
+        torch.cuda.empty_cache()
+    return
+
+
+
+
+
+#TODO: mark
+@app.command()
+def raw_test(
         testset_dir: Annotated[str, typer.Argument(
                         help='Directory of bins to test on')],
         weights: Annotated[str, typer.Argument(
-                    help='File of bins')],
-        threshold: Annotated[float, typer.Argument(
-                    help='Threshold for model prediction')],
-        results: Annotated[str, typer.Argument(
-                    help="Path to save results to")]):
+                            help='File of bins')],
+        out_dir: Annotated[str, typer.Argument(
+                        help='Directory of bins to test on')],
+        min_func_len: Annotated[int, typer.Option(
+                        help='Directory of bins to test on')]=1,
+    ):
 
-    # Make sure checkpoint exists
-    if not Path(weights).exists():
-        print(f"Path {weights} doesn't exist")
+
+    out_path = Path(out_dir)
+
+    if not out_path.exists():
+        out_path.mkdir()
+    elif out_path.is_file():
+        print("Out path is a file")
         return
+
+    test_path = Path(testset_dir)
+    if test_path.is_file():
+        files = [test_path]
+    else:
+        files = list(Path(testset_dir).glob('*'))
 
     # Load the pytorch lightning model from the checkpoints
     lit_pylit = lit.load_from_checkpoint(weights)#,loss_func=loss_func,
     #                                 learning_rate=learning_rate,
     #                                 classifier=model)
-    model = lit_pylit.classifier
-    model.eval()
+    #model = lit_pylit.classifier
+    model = lit_pylit
 
-    # make sure testdir exists 
-    testset_path = Path(testset_dir)
-    if not testset_path.exists():
-        print(f"Testset {testset_path} doesn't exist")
-        return
+    for bin in alive_it(files):
+        raw_res = rnn_predict_raw(model, bin, 1)
+        #print(len(raw_res))
+        #for i, item in enumerate(raw_res):
+        #    print(f"{i}: {type(item)}")
+        #    print(f"{item.shape}")
+        #cur_res = raw_res[0].detach().numpy()
+        #print(cur_res.shape)
 
-    # Load the files from the test set 
-    testfiles = list(testset_path.glob('*'))
+        stacked_res = np.hstack([arr.numpy().reshape(1, -1) for arr in raw_res])
+        #print(stacked_res.shape)
 
-    tp = 0
-    tn = 0
-    fp = 0
-    fn = 0
-    log_file = Path(results)
-    for file in alive_it(testfiles):
-        cur_tp, cur_tn, cur_fp, cur_fn, runtime = rnn_predict(model, file, threshold)
-        tp+=cur_tp
-        tn+=cur_tn
-        fp+=cur_fp
-        fn+=cur_fn
-        print(f"tp {tp} | tn {tn} | fp {fp} | fn {fn}")
-
-        # Get the total file size
-        stripped_file = strip_file(file)
-        file_size = os.path.getsize(stripped_file)
-        stripped_file.unlink()
-
-
-        # Read the log file
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                cur_data = json.load(f)
-        else:
-            cur_data = {}
-
-        # update the log file
-        cur_data[file.name] = {
-            'tp' : tp,
-            'tn' : tn,
-            'fp' : fp,
-            'fn' : fn,
-            'runtime' : runtime,
-            'filesize': file_size
-        }
-
-        # Update the log
-        if log_file.exists():
-            log_file.unlink()
-
-        # Dump the new log file
-        with open(log_file, 'w') as f:
-            json.dump(cur_data, f)
-
+        save_raw_prediction(stacked_res, out_path.joinpath(bin.name + "_result.npz"))
     return
+
+
+def convert_npz_to_func_list(bin_path:Path, npz:np.ndarray)->np.ndarray:
+    '''
+    '''
+
+    bin = lief.parse(str(bin_path.resolve()))
+
+    text_section = bin.get_section(".text")
+
+    # Get the base address of the loaded binary
+    base_address = bin.imagebase
+
+    start_addrs = []
+
+    # This enumerate the .text byte and sees which ones are functions
+    for i, val in enumerate(npz):
+        if val == 0:
+            continue
+        address = base_address + text_section.virtual_address + i
+        start_addrs.append(address)
+
+    return np.array(start_addrs)
+
+
+def all_lief_gnd_truth(bin_path: Path):
+    '''
+    Retrun labels all the functions in the .text section of the 
+    binary
+    '''
+    bin = lief.parse(str(bin_path.resolve()))
+
+    text_section = bin.get_section(".text")
+    text_bytes = text_section.content
+
+    # Get the bytes in the .text section
+    text_bytes = text_section.content
+
+    # Get the base address of the loaded binary
+    base_address = bin.imagebase
+
+    functions = get_functions(bin_path)
+
+    func_start_addrs = {x.addr : (x.name, x.size) for x in functions}
+    # This enumerate the .text byte and sees which ones are functions
+    for i, _ in enumerate(text_bytes):
+        address = base_address + text_section.virtual_address + i
+
+        if address in func_start_addrs.keys():
+            yield 1
+        else:
+            yield 0 
+
+
+
+@app.command()
+def read_bounds_raw(
+        binaries: Annotated[str, typer.Argument(
+                                    help='bins',
+                                    callback=iterable_path_shallow_callback
+                            )],
+        results: Annotated[str, typer.Argument(
+                        help='bin results',
+                        callback=iterable_path_deep_callback)],
+        threshold: Annotated[float, typer.Argument(
+                        help='Threshold for predictions')],
+        verbose: Annotated[bool, typer.Option(
+                        help='bin results')]=False,
+        starts: Annotated[bool, typer.Option(
+                        help='only do starts')]=False,
+        )->None:
+    '''
+    Read the raw results and calculate the confusion matrix for the BiRNN 
+
+    This file will be a matrix of 1xnum_byte
+
+    The first byte will be the first byte in the .text. However the whole 
+    matrix may not be able to cover all the .text bytes. 
+    '''
+
+    matching_bins_ends = {}
+    matching_bins_starts = {}
+
+    for bin in binaries:
+        found_start = False
+        found_end = False
+        for res in [x for x in results if x.is_file() and "result" in x.name]:
+            if not starts:
+                if bin.name in res.name and "end" in res.name:
+                    matching_bins_ends[bin] = res
+                    found_end = True
+            if bin.name in res.name and "start" in res.name:
+                matching_bins_starts[bin] = res
+                found_start= True
+        if starts:
+            if not found_start:
+                print(f"Could not find a matching file for {bin}")
+                raise typer.Abort()
+        elif not found_end or not found_start:
+            print(f"Could not find a matching file for {bin}")
+            raise typer.Abort()
+
+    total_start_conf = ConfusionMatrix(0,0,0,0)
+    total_end_conf = ConfusionMatrix(0,0,0,0)
+
+    # Read the result for the bins
+    for bin_path in alive_it(matching_bins_starts.keys()):
+
+        # Init the confusion matrix for this bin
+        start_conf = ConfusionMatrix(0,0,0,0)
+        end_conf = ConfusionMatrix(0,0,0,0)
+
+        # 1  - Ground truth for bin file, this changes depending on 
+        #       if we are reading the result of an end experiment or 
+        #       not.
+        gnd_truth = lief_gnd_truth(bin_path.resolve())
+        gnd_matrix_starts = gnd_truth.func_addrs.flatten()
+        gnd_matrix_ends = gnd_truth.func_addrs.flatten() + gnd_truth.func_lens.flatten()
+
+
+        # 2 - Read the npz data 
+        starts_prediction = read_birnn_npz(matching_bins_starts[bin_path])
+
+        if not starts:
+            ends_prediction = read_birnn_npz(matching_bins_ends[bin_path])
+
+        # 2.1 - Use the threshold to identiry positives and negatives
+        starts_prediction[starts_prediction >= threshold] = 1
+        starts_prediction[starts_prediction < threshold] = 0
+
+        if not starts:
+            ends_prediction[ends_prediction >= threshold] = 1
+            ends_prediction[ends_prediction < threshold] = 0
+
+
+        gnd_matrix_starts = np.array(list(all_lief_gnd_truth(bin_path.resolve()))).flatten()
+        starts_prediction = starts_prediction.flatten()
+        print(gnd_matrix_starts.shape)
+        print(starts_prediction.shape)
+
+        with open("LIEF", 'w') as f:
+            for val in gnd_matrix_starts:
+                f.write(f"{val}\n")
+        with open("BIRNN", 'w') as f:
+            for val in starts_prediction:
+                f.write(f"{val}\n")
+
+
+        # 3 - Compare the two lists
+        # Get all the start addrs that are in both, in ida only, in gnd_trush only
+        start_conf.tp=len(np.intersect1d(gnd_matrix_starts, starts_prediction))
+        start_conf.fp=len(np.setdiff1d( starts_prediction, gnd_matrix_starts ))
+        start_conf.fn=len(np.setdiff1d(gnd_matrix_starts, starts_prediction))
+
+
+
+        # 2.2 Currently, the starts and ends have all the bytes in the .text section
+        #       1. start at text section base address 
+        #       2. starts = [index_of_x(x)+base_addr for x in matrix if x==1]
+        starts_prediction = convert_npz_to_func_list(bin_path,starts_prediction.flatten())
+
+        if not starts:
+            ends_prediction = convert_npz_to_func_list(bin_path,ends_prediction.flatten())
+
+
+        with open("LIEF", 'w') as f:
+            for val in gnd_matrix_starts:
+                f.write(f"{val}\n")
+        with open("BIRNN", 'w') as f:
+            for val in starts_prediction:
+                f.write(f"{val}\n")
+        print("write to files")
+
+        # 3 - Compare the two lists
+        # Get all the start addrs that are in both, in ida only, in gnd_trush only
+        start_conf.tp=len(np.intersect1d(gnd_matrix_starts, starts_prediction))
+        start_conf.fp=len(np.setdiff1d( starts_prediction, gnd_matrix_starts ))
+        start_conf.fn=len(np.setdiff1d(gnd_matrix_starts, starts_prediction))
+
+        print("Set diff")
+
+        if not starts:
+            end_conf.tp=len(np.intersect1d(gnd_matrix_ends, ends_prediction))
+            end_conf.fp=len(np.setdiff1d( ends_prediction, gnd_matrix_ends ))
+            end_conf.fn=len(np.setdiff1d(gnd_matrix_ends, ends_prediction))
+
+
+        if verbose:
+            print(f"Bin: {bin_path}")
+            print(f"res start: { matching_bins_starts[bin_path]}")
+            if not starts:
+                print(f"res end: {   matching_bins_ends[bin_path]}")
+            print(f"{ start_conf}")
+            print(f"{ end_conf}")
+            
+
+        # Save total results
+        total_start_conf.tp += start_conf.tp
+        total_start_conf.fp += start_conf.fp
+        total_start_conf.fn += start_conf.fn
+
+        # Save total results
+        total_end_conf.tp += end_conf.tp
+        total_end_conf.fp += end_conf.fp
+        total_end_conf.fn += end_conf.fn
+
+
+    print(f"Starts")
+    print(f"Conf Matrix: {total_start_conf}")     
+    print(f"Ends")
+    print(f"Conf Matrix: {total_end_conf}")     
+    return
+
+
+def read_birnn_npz(inp: Path)->np.ndarray:
+    '''
+    Read the ida npz
+    '''
+    npz_file = np.load(inp)
+    return npz_file[list(npz_file.keys())[0]]
+
+
+#@app.command()
+#def test_on(
+#        testset_dir: Annotated[str, typer.Argument(
+#                        help='Directory of bins to test on')],
+#        weights: Annotated[str, typer.Argument(
+#                    help='File of bins')],
+#        threshold: Annotated[float, typer.Argument(
+#                    help='Threshold for model prediction')],
+#        results: Annotated[str, typer.Argument(
+#                    help="Path to save results to")]):
+#
+#    # Make sure checkpoint exists
+#    if not Path(weights).exists():
+#        print(f"Path {weights} doesn't exist")
+#        return
+#
+#    # Load the pytorch lightning model from the checkpoints
+#    lit_pylit = lit.load_from_checkpoint(weights)#,loss_func=loss_func,
+#    #                                 learning_rate=learning_rate,
+#    #                                 classifier=model)
+#    model = lit_pylit.classifier
+#    model.eval()
+#
+#    # make sure testdir exists 
+#    testset_path = Path(testset_dir)
+#    if not testset_path.exists():
+#        print(f"Testset {testset_path} doesn't exist")
+#        return
+#
+#    # Load the files from the test set 
+#    testfiles = list(testset_path.glob('*'))
+#
+#    tp = 0
+#    tn = 0
+#    fp = 0
+#    fn = 0
+#    log_file = Path(results)
+#    for file in alive_it(testfiles):
+#        cur_tp, cur_tn, cur_fp, cur_fn, runtime = rnn_predict(model, file, threshold)
+#        tp+=cur_tp
+#        tn+=cur_tn
+#        fp+=cur_fp
+#        fn+=cur_fn
+#        print(f"tp {tp} | tn {tn} | fp {fp} | fn {fn}")
+#
+#        # Get the total file size
+#        stripped_file = strip_file(file)
+#        file_size = os.path.getsize(stripped_file)
+#        stripped_file.unlink()
+#
+#
+#        # Read the log file
+#        if log_file.exists():
+#            with open(log_file, 'r') as f:
+#                cur_data = json.load(f)
+#        else:
+#            cur_data = {}
+#
+#        # update the log file
+#        cur_data[file.name] = {
+#            'tp' : tp,
+#            'tn' : tn,
+#            'fp' : fp,
+#            'fn' : fn,
+#            'runtime' : runtime,
+#            'filesize': file_size
+#        }
+#
+#        # Update the log
+#        if log_file.exists():
+#            log_file.unlink()
+#
+#        # Dump the new log file
+#        with open(log_file, 'w') as f:
+#            json.dump(cur_data, f)
+#
+#    return
 
 @app.command()
 def model_summary():
@@ -1171,6 +1469,7 @@ def model_summary():
 
 if __name__ == "__main__":
     app()
+
     exit(1)
 
     OPTIMIZATION = 'O1'
