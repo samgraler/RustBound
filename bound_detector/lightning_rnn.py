@@ -418,8 +418,9 @@ def single_bin_dataloader(
     extra_chunks = labeled_data.shape[0] - (num_chunks*1000)
     labeled_data = labeled_data[:-extra_chunks]
 
-    print(f"Using {num_chunks} of 1000 for {labeled_data.shape[0]} bytes")
-    print(f"We are then lossing{labeled_data.shape[0] - num_chunks*1000} bytes")
+    #print(f"Using {num_chunks} of 1000 for {labeled_data.shape[0]} bytes")
+    #print(f"Gile: {input_bin}: {labeled_data.shape[0]}")
+    #print(f"We are then lossing{labeled_data.shape[0] - num_chunks*1000} bytes")
 
     inp_array = np.empty((num_chunks,1000,255), dtype=np.float64)
     lbl_array = np.empty((num_chunks,1000,1), dtype=np.float64)
@@ -549,13 +550,13 @@ def lit_model_train(input_files,
     return classifier.metrics, classifier
 
 
-def rnn_predict_raw(model, unstripped_bin:Path, min_func_len:int):
+def rnn_predict_raw(model, unstripped_bin:Path, min_func_len:int, ends: bool):
     '''
     Use the model to predict for the passed binary 
     '''
 
     # 1. Create dataloader for the single binary 
-    bin_dataloader = single_bin_dataloader(unstripped_bin, min_func_len, batch_size=16)
+    bin_dataloader = single_bin_dataloader(unstripped_bin, min_func_len, batch_size=16, ends=ends)
 
     # 2. Use the model to predict
     trainer = pylight.Trainer(precision="16-mixed")
@@ -1045,6 +1046,10 @@ def raw_test_bounds(
                             help='Weights for end model')],
         out_dir: Annotated[str, typer.Argument(
                         help='Directory of bins to test on')],
+        only_starts: Annotated[bool, typer.Option(
+                        help='Directory of bins to test on')]=False,
+        only_ends: Annotated[bool, typer.Option(
+                        help='Directory of bins to test on')]=False,
         min_func_len: Annotated[int, typer.Option(
                         help='Directory of bins to test on')]=1,
     ):
@@ -1068,25 +1073,43 @@ def raw_test_bounds(
     #start_birnn_model = lit.load_from_checkpoint(start_weights)
     #end_birnn_model = lit.load_from_checkpoint(end_weights)
 
-    # Predict the starts and ends for the binaries
-    for bin in alive_it(files):
-        # Load the pytorch lightning model from the checkpoints
-        start_birnn_model = lit.load_from_checkpoint(start_weights)
-        start_raw_res = rnn_predict_raw(start_birnn_model, bin, 1)
-        stacked_start_res = np.hstack([arr.numpy().reshape(1, -1) for arr in start_raw_res])
-        save_raw_prediction(stacked_start_res, out_path.joinpath(bin.name + "_starts_result.npz"))
-        del stacked_start_res
-        del start_raw_res
-        torch.cuda.empty_cache()
 
-    for bin in alive_it(files):
-        end_birnn_model = lit.load_from_checkpoint(end_weights)
-        end_raw_res = rnn_predict_raw(end_birnn_model, bin, 1)
-        stacked_end_res = np.hstack([arr.numpy().reshape(1, -1) for arr in end_raw_res])
-        save_raw_prediction(stacked_end_res, out_path.joinpath(bin.name + "_ends_result.npz"))
-        del stacked_end_res
-        del end_raw_res
-        torch.cuda.empty_cache()
+    if not only_ends:
+        # Predict the starts and ends for the binaries
+        for bin in files:
+
+            out_file =  out_path.joinpath(bin.name + "_starts_result.npz")
+            if out_file.exists():
+                continue
+
+            # Load the pytorch lightning model from the checkpoints
+            start_birnn_model = lit.load_from_checkpoint(start_weights)
+            start_raw_res = rnn_predict_raw(start_birnn_model, bin, 1, ends=False)
+            stacked_start_res = np.hstack([arr.numpy().reshape(1, -1) for arr in start_raw_res])
+
+            save_raw_prediction(stacked_start_res, out_file)
+            del stacked_start_res
+            del start_raw_res
+            torch.cuda.empty_cache()
+
+    if not only_starts:
+        for bin in files:
+            out_file = out_path.joinpath(bin.name + "_ends_result.npz")
+            if out_file.exists():
+                continue 
+
+            # Load the model and predict
+            end_birnn_model = lit.load_from_checkpoint(end_weights)
+            end_raw_res = rnn_predict_raw(end_birnn_model, bin, 1, ends=True)
+
+
+            # Stack the results together
+            stacked_end_res = np.hstack([arr.numpy().reshape(1, -1) 
+                                    for arr in end_raw_res])
+            save_raw_prediction(stacked_end_res, out_file)
+            del stacked_end_res
+            del end_raw_res
+            torch.cuda.empty_cache()
     return
 
 
