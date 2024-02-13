@@ -418,12 +418,12 @@ def single_bin_dataloader(
     extra_chunks = labeled_data.shape[0] - (num_chunks*1000)
     labeled_data = labeled_data[:-extra_chunks]
 
-    #print(f"Using {num_chunks} of 1000 for {labeled_data.shape[0]} bytes")
+    print(f"Using {num_chunks} of 1000 for {labeled_data.shape[0]} bytes")
     #print(f"Gile: {input_bin}: {labeled_data.shape[0]}")
     #print(f"We are then lossing{labeled_data.shape[0] - num_chunks*1000} bytes")
 
-    inp_array = np.empty((num_chunks,1000,255), dtype=np.float64)
-    lbl_array = np.empty((num_chunks,1000,1), dtype=np.float64)
+    inp_array = np.empty((num_chunks,1000,255), dtype=np.float32)
+    lbl_array = np.empty((num_chunks,1000,1), dtype=np.float32)
 
     for i in range(num_chunks):
         # Get chunk data
@@ -555,8 +555,10 @@ def rnn_predict_raw(model, unstripped_bin:Path, min_func_len:int, ends: bool):
     Use the model to predict for the passed binary 
     '''
 
+    print("building dataloader")
     # 1. Create dataloader for the single binary 
     bin_dataloader = single_bin_dataloader(unstripped_bin, min_func_len, batch_size=16, ends=ends)
+    print('dataloader built')
 
     # 2. Use the model to predict
     trainer = pylight.Trainer(precision="16-mixed")
@@ -1074,6 +1076,7 @@ def raw_test_bounds(
     #end_birnn_model = lit.load_from_checkpoint(end_weights)
 
 
+    count = 0
     if not only_ends:
         # Predict the starts and ends for the binaries
         for bin in files:
@@ -1092,6 +1095,9 @@ def raw_test_bounds(
             del start_raw_res
             torch.cuda.empty_cache()
 
+            print(f"Done {bin}")
+
+    count = 0
     if not only_starts:
         for bin in files:
             out_file = out_path.joinpath(bin.name + "_ends_result.npz")
