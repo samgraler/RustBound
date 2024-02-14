@@ -50,6 +50,7 @@ from ripkit.ripbin import (
     #must_be_file_callback,
     iterable_path_shallow_callback,
     iterable_path_deep_callback,
+    calc_metrics,
 )
 
 import lightning.pytorch as pylight
@@ -1187,7 +1188,7 @@ def convert_npz_to_func_list(bin_path:Path, npz:np.ndarray)->np.ndarray:
     start_addrs = []
 
     # This enumerate the .text byte and sees which ones are functions
-    for i, val in enumerate(npz):
+    for i, val in enumerate(npz.flatten()):
         if val == 0:
             continue
         address = base_address + text_section.virtual_address + i
@@ -1287,85 +1288,131 @@ def read_bounds_raw(
         #       if we are reading the result of an end experiment or 
         #       not.
         gnd_truth = lief_gnd_truth(bin_path.resolve())
-        gnd_matrix_starts = gnd_truth.func_addrs.flatten()
-        gnd_matrix_ends = gnd_truth.func_addrs.flatten() + gnd_truth.func_lens.flatten()
+        #gnd_matrix_starts = gnd_truth.func_addrs.flatten()
+        gnd_matrix_starts = gnd_truth.func_addrs
+        lengths_adjusted = gnd_truth.func_lens
+        gnd_matrix_ends = gnd_truth.func_addrs + lengths_adjusted
+        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+                                    gnd_matrix_ends.T.reshape(-1,1)), axis=1)
+        #gnd_matrix_ends = gnd_truth.func_addrs.flatten() + gnd_truth.func_lens.flatten()
 
 
         # 2 - Read the npz data 
-        starts_prediction = read_birnn_npz(matching_bins_starts[bin_path])
+        birnn_starts = read_birnn_npz(matching_bins_starts[bin_path])
 
         if not starts:
-            ends_prediction = read_birnn_npz(matching_bins_ends[bin_path])
+            birnn_ends = read_birnn_npz(matching_bins_ends[bin_path])
+
+        print(f"HEREEEEEEEEEEEEEEEEEEEE")
+        print(birnn_starts.shape)
+        print(birnn_starts.flatten().shape)
+        print(f"HEREEEEEEEEEEEEEEEEEEEE")
+        with open("BIRNN_RAW", 'w') as f:
+            for i, val in enumerate(birnn_starts.flatten()):
+                f.write(f"{val}\n")
+        with open("LIEF_RAW", 'w') as f:
+            for i, val in enumerate(gnd_matrix_starts):
+                f.write(f"{val}\n")
+
 
         # 2.1 - Use the threshold to identiry positives and negatives
-        starts_prediction[starts_prediction >= threshold] = 1
-        starts_prediction[starts_prediction < threshold] = 0
+        birnn_starts[birnn_starts >= threshold] = 1
+        birnn_starts[birnn_starts < threshold] = 0
+        birnn_starts = birnn_starts.astype(int)
+        print(len(birnn_starts[birnn_starts==1]))
+        birnn_ends[birnn_ends >= threshold] = 1
+        birnn_ends[birnn_ends < threshold] = 0
+        birnn_ends = birnn_starts.astype(int)
 
+        start_indices = np.where(birnn_starts == 1)[1]
         if not starts:
-            ends_prediction[ends_prediction >= threshold] = 1
-            ends_prediction[ends_prediction < threshold] = 0
+            ends_indices = np.where(birnn_ends == 1)[1]
+
+        # 3 - Get the address of the first byte in the .text section and add this
+        #     to all the function bound indices
+        #parsed_bin = lief.parse(str(bin_path.resolve()))
+        #text_section_virt_addr = parsed_bin.get_section(".text").virtual_address
+        #text_section_start = parsed_bin.imagebase + text_section_virt_addr
+        #birnn_starts = start_indices + text_section_start
+        #birnn_ends = ends_indices + text_section_start
+
+        birnn_starts = convert_npz_to_func_list(bin_path, birnn_starts)
+        birnn_ends = convert_npz_to_func_list(bin_path, birnn_ends)
+
+        #birnn_starts[birnn_starts >= threshold] = 1
+        #birnn_starts[birnn_starts < threshold] = 0
+        #birnn_starts = birnn_starts.astype(int)
+        #print(len(birnn_starts[birnn_starts==1]))
+
+        #if not starts:
+        #    birnn_ends[birnn_ends >= threshold] = 1
+        #    birnn_ends[birnn_ends < threshold] = 0
+        #    birnn_ends = birnn_starts.astype(int)
 
 
-        gnd_matrix_starts = np.array(list(all_lief_gnd_truth(bin_path.resolve()))).flatten()
-        starts_prediction = starts_prediction.flatten()
+        #gnd_matrix_starts = np.array(list(all_lief_gnd_truth(bin_path.resolve()))).flatten()
+        #birnn_starts = birnn_starts.flatten()
+
+        # 2.2 - Start prediction current is list of all byte labels, convert to a list of addrs
+        #     to all the function bound indices
+
         print(gnd_matrix_starts.shape)
-        print(starts_prediction.shape)
+        print(birnn_starts.shape)
 
-        with open("LIEF", 'w') as f:
-            for val in gnd_matrix_starts:
-                f.write(f"{val}\n")
-        with open("BIRNN", 'w') as f:
-            for val in starts_prediction:
-                f.write(f"{val}\n")
-
-
-        # 3 - Compare the two lists
-        # Get all the start addrs that are in both, in ida only, in gnd_trush only
-        start_conf.tp=len(np.intersect1d(gnd_matrix_starts, starts_prediction))
-        start_conf.fp=len(np.setdiff1d( starts_prediction, gnd_matrix_starts ))
-        start_conf.fn=len(np.setdiff1d(gnd_matrix_starts, starts_prediction))
-
+        #with open("LIEF", 'w') as f:
+        #    for val in gnd_matrix_starts:
+        #        f.write(f"{val}\n")
+        #with open("BIRNN", 'w') as f:
+        #    for val in birnn_starts:
+        #        f.write(f"{val}\n")
 
 
         # 2.2 Currently, the starts and ends have all the bytes in the .text section
         #       1. start at text section base address 
         #       2. starts = [index_of_x(x)+base_addr for x in matrix if x==1]
-        starts_prediction = convert_npz_to_func_list(bin_path,starts_prediction.flatten())
+        #birnn_starts = convert_npz_to_func_list(bin_path,birnn_starts.flatten())
 
-        if not starts:
-            ends_prediction = convert_npz_to_func_list(bin_path,ends_prediction.flatten())
-
+        #if not starts:
+        #    birnn_ends = convert_npz_to_func_list(bin_path,birnn_ends.flatten())
 
         with open("LIEF", 'w') as f:
-            for val in gnd_matrix_starts:
-                f.write(f"{val}\n")
+            for i, val in enumerate(gnd_matrix_starts):
+                if i < len(gnd_matrix_starts)-1:
+                    f.write(f"{val}: {gnd_matrix_starts[i+1]-val}\n")
+                else:
+                    f.write(f"{val}\n")
         with open("BIRNN", 'w') as f:
-            for val in starts_prediction:
-                f.write(f"{val}\n")
+            for i, val in enumerate(birnn_starts):
+                if i < len(birnn_starts)-1:
+                    f.write(f"{val}: {birnn_starts[i+1]-val}\n")
+                else:
+                    f.write(f"{val}\n")
+
         print("write to files")
 
         # 3 - Compare the two lists
         # Get all the start addrs that are in both, in ida only, in gnd_trush only
-        start_conf.tp=len(np.intersect1d(gnd_matrix_starts, starts_prediction))
-        start_conf.fp=len(np.setdiff1d( starts_prediction, gnd_matrix_starts ))
-        start_conf.fn=len(np.setdiff1d(gnd_matrix_starts, starts_prediction))
+        #start_conf.tp=len(np.intersect1d(gnd_matrix_starts, birnn_starts))
+        #start_conf.fp=len(np.setdiff1d( birnn_starts, gnd_matrix_starts ))
+        #start_conf.fn=len(np.setdiff1d(gnd_matrix_starts, birnn_starts))
 
-        print("Set diff")
+        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], birnn_starts))
+        start_conf.fp=len(np.setdiff1d( birnn_starts, gnd_matrix[:,0] ))
+        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], birnn_starts))
 
-        if not starts:
-            end_conf.tp=len(np.intersect1d(gnd_matrix_ends, ends_prediction))
-            end_conf.fp=len(np.setdiff1d( ends_prediction, gnd_matrix_ends ))
-            end_conf.fn=len(np.setdiff1d(gnd_matrix_ends, ends_prediction))
+        # 5 - Compare the ends
+        end_conf.tp=len(np.intersect1d(gnd_matrix[:,1], birnn_ends))
+        end_conf.fp=len(np.setdiff1d( birnn_ends, gnd_matrix[:,1] ))
+        end_conf.fn=len(np.setdiff1d(gnd_matrix[:,1], birnn_ends))
 
 
-        if verbose:
-            print(f"Bin: {bin_path}")
-            print(f"res start: { matching_bins_starts[bin_path]}")
-            if not starts:
-                print(f"res end: {   matching_bins_ends[bin_path]}")
-            print(f"{ start_conf}")
-            print(f"{ end_conf}")
-            
+        #print("Set diff")
+
+        #if not starts:
+        #    end_conf.tp=len(np.intersect1d(gnd_matrix_ends, birnn_ends))
+        #    end_conf.fp=len(np.setdiff1d( birnn_ends, gnd_matrix_ends ))
+        #    end_conf.fn=len(np.setdiff1d(gnd_matrix_ends, birnn_ends))
+
 
         # Save total results
         total_start_conf.tp += start_conf.tp
@@ -1377,11 +1424,26 @@ def read_bounds_raw(
         total_end_conf.fp += end_conf.fp
         total_end_conf.fn += end_conf.fn
 
+        if verbose:
+            print(f"Starts: {bin_path}")
+            print(f"Conf: { start_conf }")
+            print(f"Metirx{ calc_metrics(start_conf)}")
+
+            if not starts:
+                print("Ends")
+                print(f"Conf: { end_conf }")
+                print(f"Metirx{ calc_metrics(end_conf)}")
+     
+
+
 
     print(f"Starts")
     print(f"Conf Matrix: {total_start_conf}")     
+    print(f"Metrics: {calc_metrics(total_start_conf)}")
+
     print(f"Ends")
     print(f"Conf Matrix: {total_end_conf}")     
+    print(f"Metrics: {calc_metrics(total_end_conf)}")
     return
 
 
