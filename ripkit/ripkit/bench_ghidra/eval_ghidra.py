@@ -434,6 +434,8 @@ def read_bounds_raw(
                 matching_files[bin] = res_file
 
     if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
+        print(f"Num matching files {len(matching_files.keys())}")
+        print(f"Num bins in path {len(list(bin_path.glob('*')))}")
         print(f"Some bins don't have matching result file")
         raise Exception
 
@@ -496,17 +498,23 @@ def read_bounds_raw(
             print(f"{filt_offset_funcs.shape[0]}")
             raise Exception
 
-        # Check the predicted bounds for correctness
-        for row in filt_offset_funcs:
-            if np.any(np.all(row == gnd_matrix, axis=1)): 
-                bound_conf.tp+=1
-            else:
-                bound_conf.fp+=1
 
-        # Check to see how many false negative there were 
-        for row in gnd_matrix:
-            if not np.any(np.all(row == filt_offset_funcs, axis=1)):
-                bound_conf.fn+=1
+        bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_offset_funcs, gnd_matrix),axis=1))
+        bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
+        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+
+
+        # Check the predicted bounds for correctness
+        #for row in filt_offset_funcs:
+        #    if np.any(np.all(row == gnd_matrix, axis=1)): 
+        #        bound_conf.tp+=1
+        #    else:
+        #        bound_conf.fp+=1
+
+        ## Check to see how many false negative there were 
+        #for row in gnd_matrix:
+        #    if not np.any(np.all(row == filt_offset_funcs, axis=1)):
+        #        bound_conf.fn+=1
 
         total_bytes += gnd_truth.num_bytes
 
@@ -526,7 +534,9 @@ def read_bounds_raw(
             print(f"Metrics: {calc_metrics(bound_conf)}")
 
     print(f"Total Metrics")
+    print(f"Starts: {total_start_conf}")
     print(f"Starts: {calc_metrics(total_start_conf)}")
+    print(f"Bounds: {total_bound_conf}")
     print(f"Bounds: {calc_metrics(total_bound_conf)}")
 
     return 

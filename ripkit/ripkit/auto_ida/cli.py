@@ -482,7 +482,7 @@ def inspect_many_results(
             #    missed_both.start_addrs.append(row[0])
             #    missed_both.lengths.append(filt_ida_funcs[i][1])
 
-    ends_missed_length = [abs(x-y) for (x,y) in zip(tot_missed_ends.correct_lens, tot_missed_ends.incorrect_lens)]
+    ends_missed_length = [x-y for (x,y) in zip(tot_missed_ends.correct_lens, tot_missed_ends.incorrect_lens)]
     total_missed_by = sum(ends_missed_length)
 
 
@@ -494,10 +494,13 @@ def inspect_many_results(
     print(f"Mode: {stats.mode(ends_missed_length)}")
 
     freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
+
     print(f"Bins edges: {bin_edges}")
     print(f"Count: {freqs}")
 
-    make_simple_plot(tot_missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", "O1 IDA missed by amoutns" , Path(graph_path) )
+    make_simple_plot(tot_missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", "O1 IDA missed by amoutns" , graph_path )
+
+    make_simple_pdf(tot_missed_ends.tp_start_addrs, ends_missed_length, "Bins", "Frequency", "PDF" , Path(f"{graph_path.name}_pdf_graph") )
 
 
     return
@@ -571,6 +574,12 @@ def inspect_single_results(
 
     # Check to see how many false negative there were 
     for i, row in enumerate(gnd_matrix):
+
+        # If the boudns are exauasted these are all false negatives
+        if i >= filt_ida_funcs.shape[0]:
+            bound_conf.fn+=1
+            continue
+            
         if row[0] == filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
             missed_ends.tp_start_addrs.append(row[0])
             missed_ends.incorrect_lens.append(filt_ida_funcs[i][1])
@@ -583,7 +592,7 @@ def inspect_single_results(
         if not np.any(np.all(row == filt_ida_funcs, axis=1)):
             bound_conf.fn+=1
 
-    ends_missed_length = [abs(x-y) for (x,y) in zip(missed_ends.correct_lens, missed_ends.incorrect_lens)]
+    ends_missed_length = [x-y for (x,y) in zip(missed_ends.correct_lens, missed_ends.incorrect_lens)]
     total_missed_by = sum(ends_missed_length)
 
     print(f"Function start confusion matrix: {start_conf}")
@@ -600,7 +609,10 @@ def inspect_single_results(
     print(f"Bins edges: {bin_edges}")
     print(f"Count: {freqs}")
 
-    make_simple_plot(missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", f"Distance between predicted functions ends and correct function ends vs TP start addres for binary {bin_path.name}",Path("ends_plot.png") )
+    make_simple_plot(missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", f"Distance between predicted functions ends and correct function ends vs TP start addres for binary {bin_path.name}",Path(f"{bin_path.name}_ends_plot.png") )
+
+    make_simple_pdf(missed_ends.tp_start_addrs, ends_missed_length, "Distribution of FP distance from TP", "Frequency", f"PDF of FP delta TP for {bin_path.name}",Path(f"{bin_path.name}_ends_pdf.png") )
+
     return
 
 def make_simple_plot(x,y, label_x:str, label_y:str, title:str, save_path:Path):
@@ -619,6 +631,72 @@ def make_simple_plot(x,y, label_x:str, label_y:str, title:str, save_path:Path):
     plt.grid(True)
     plt.savefig(save_path)
     return
+
+def make_simple_pdf(x,y, label_x: str, label_y: str, title:str, save_path: Path):
+    '''
+    Make a simple probability density graph
+    '''
+
+    y = np.array(y)
+
+    # Define the bin size
+    bin_size = 4
+    
+    # Calculate the histogram
+    hist, bins = np.histogram(y, bins=np.arange(min(y), max(y) + bin_size, bin_size))
+    
+    # Plot the histogram
+    plt.bar(bins[:-1], hist, width=bin_size, align='center')
+    
+    # Set the x-axis to have its center at 0
+    plt.xlim(-max(abs(y)), max(abs(y)))
+    
+    # Add labels and title
+    plt.xlabel(label_x)
+    plt.ylabel(label_y)
+    plt.title(title)
+
+    #print(f"Total miss length {total_missed_by}")
+    #avg_missed_ends = total_missed_by / len(tot_missed_ends.incorrect_lens)
+    #print(f"Avg missed {avg_missed_ends}")
+    #print(f"Mean: {np.mean(ends_missed_length)}")
+    #print(f"Median: {np.median(ends_missed_length)}")
+    #print(f"Mode: {stats.mode(ends_missed_length)}")
+
+    freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
+
+
+
+
+
+        # Define bin size
+    #bin_size = 8
+
+    #x = np.array(x)
+    #y = np.array(y)
+    #
+    ## Calculate the range of y values
+    #y_min = np.min(y)
+    #y_max = np.max(y)
+    #
+    ## Calculate the number of bins
+    #num_bins = int(np.ceil((y_max - y_min) / bin_size))
+    #
+    ## Create bins
+    #bins = np.arange(y_min, y_max , num_bins+1 )
+    #
+    ## Plot histogram
+    #plt.hist(y, bins=bins, density=True, edgecolor='black', alpha=0.7)
+    #
+    ## Add labels and title
+    #plt.xlabel('Y Values')
+    #plt.ylabel('Frequency')
+    #plt.title('Distribution of Y Values')
+    
+    # Show plot
+    plt.savefig(save_path)
+
+    return 
 
 
 
@@ -737,7 +815,10 @@ def read_results(
             print(f"Starts: {start_conf}")
             print(f"Starts Metrics: {calc_metrics(start_conf)}")
             print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
+
+    print(f"Start conf: {total_start_conf}")
     print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
+    print(f"Bound conf: {total_bound_conf}")
     print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
     return 
 

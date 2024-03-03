@@ -1,10 +1,11 @@
 from pathlib import Path 
+import itertools
 import shutil
 import subprocess
 import time
 import random
 import json
-from typing import List
+from typing import List, Generator
 from typing_extensions import Annotated
 from fairseq.models.roberta import RobertaModel
 import torch
@@ -29,7 +30,7 @@ from rich.table import Table
 from rich.progress import track
 
 console = Console()
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
 
 @dataclass 
 class FunctionInfo():
@@ -191,7 +192,7 @@ def load_bin_for_xda_inp(path: Path):
             lbl = 'N'
         yield [str(byte), lbl]
 
-def xda_predict_raw(bin: Path, model) -> tuple[np.ndarray,float]:
+def xda_predict_raw(bin: Path, model): #-> Generator[tuple[np.ndarray,float], None, None]:
     '''
     Predict all the bytes in the .text section of the binary model
     '''
@@ -205,16 +206,12 @@ def xda_predict_raw(bin: Path, model) -> tuple[np.ndarray,float]:
     text_bytes = [f"{get_hex_str(x)}" for x in text_bytes] 
 
     STEP = 512
-    START = 1 
-    END = 2
     total_time = 0
-
     total_res = np.zeros((int(len(text_bytes)/STEP)+1 , 512,3))
-
     loop_counter = 0
-    starts = 0
-    ends = 0
-    for i in alive_it(range(0, len(text_bytes)-STEP-1, STEP)):
+
+    #for i in alive_it(range(0, len(text_bytes)-STEP-1, STEP)):
+    for i in range(0, len(text_bytes)-STEP-1, STEP):
         loop_counter+=1
 
         # Get the total chunnk, and the labeled chunk 
@@ -228,15 +225,14 @@ def xda_predict_raw(bin: Path, model) -> tuple[np.ndarray,float]:
         logprobs = model.predict('funcbound', encoded_tokens)
         total_time += time.time() - start
 
-        total_res[loop_counter] = logprobs.detach().numpy()
+        total_res[loop_counter] = logprobs.detach().cpu().numpy()
+        #cur_res = logprobs.detach().cpu().numpy()
+        #yield cur_res, total_time
+    return total_res,total_time
 
         # The following line will decide what classification the byte is
-        predictions = logprobs.argmax(dim=2).view(-1).data
-        starts += np.count_nonzero(predictions == START)
-        ends += np.count_nonzero(predictions == END)
-    print(starts)
-    print(ends)
-    return total_res, total_time
+        #predictions = logprobs.argmax(dim=2).view(-1).data
+    #return total_res, total_time
 
 def xda_predict(inp_file: Path, model, out_file:Path = None):
 
@@ -311,6 +307,10 @@ def xda_predict(inp_file: Path, model, out_file:Path = None):
 
 @app.command()
 def unified_gen_training(
+    num_pretrain: Annotated[int, typer.Argument()],
+    num_finetune: Annotated[int, typer.Argument()],
+    num_valid: Annotated[int, typer.Argument()],
+    base_path: Annotated[str, typer.Argument()],
     ):
     '''
     For each pretraining dataset used in other experiemnts, pick x binaries.
@@ -321,66 +321,81 @@ def unified_gen_training(
 
     # TODO warnings
 
+    #dataset_bins = Path("../datasets/20_file_subset/")
+    #if not dataset_bins.exists():
+    #    print("Dataset does not exist")
+    #    return 
+    #
+    #pretrain_tot = []
+    #valid_tot = []
+    #finetune_tot = []
 
+    #for subset in dataset_bins.iterdir():
+    #    # 9 files in the subset goes to pretrain
+    #    # 1 file goes to validation 
+    #    # 10 files go to fintune 
+    #    subset_files = list(subset.glob('*'))
+    #    pretrain_tot.extend(subset_files[:9])
+    #    valid_tot.append(subset_files[9])
+    #    finetune_tot.extend(subset_files[10:])
 
-    dataset_bins = Path("../datasets/20_file_subset/")
-    if not dataset_bins.exists():
-        print("Dataset does not exist")
-        return 
-    
-    pretrain_tot = []
-    valid_tot = []
-    finetune_tot = []
-
-    for subset in dataset_bins.iterdir():
-        # 9 files in the subset goes to pretrain
-        # 1 file goes to validation 
-        # 10 files go to fintune 
-        subset_files = list(subset.glob('*'))
-        pretrain_tot.extend(subset_files[:9])
-        valid_tot.append(subset_files[9])
-        finetune_tot.extend(subset_files[10:])
-
-    generate_data_src_pretrain_all(pretrain_tot, valid_tot)
-    generate_data_src_finetune_for_funcbound(finetune_tot)
-    print("Ready to train new model...")
+    #generate_data_src_pretrain_all(pretrain_tot, valid_tot)
+    #generate_data_src_finetune_for_funcbound(finetune_tot)
+    #print("Ready to train new model...")
 
     # TODO: Hardcoded
     # Go to each of the previously used dataset, and pick bins
 
     # Store the bins
-    #pretrain_dict = {}
-    #finetune_dict = {}
+    pretrain_dict = {}
+    finetune_dict = {}
 
-    ## All pretrain, valid,finetune
-    #pretrain_tot = []
-    #finetune_tot = []
-    #valid_tot = []
+    # All pretrain, valid,finetune
+    pretrain_tot = []
+    finetune_tot = []
+    valid_tot = []
 
-    #for dir in base_path.iterdir():
-    #    pretrain = dir / Path("dataset_pretrain")
-    #    finetune = dir / Path("dataset_finetune")
+    base_path = Path(base_path)
 
-    #    pretrain_bins = random.sample(list(pretrain.glob('*')), num_pretrain)
-    #    for bin in pretrain_bins:
-    #        pretrain_tot.append(bin)
-    #    pretrain_dict[dir] = pretrain_bins
+    base_saved = Path("unified_sampled_bins")
+    base_saved.mkdir()
 
-    #    finetune_bins = random.sample(list(finetune.glob('*')), num_pretrain)
-    #    for bin in finetune_bins:
-    #        finetune_tot.append(bin)
-    #    finetune_dict[dir] = finetune_bins
+    for dir in base_path.iterdir():
+        pretrain = dir / Path("dataset_pretrain")
+        finetune = dir / Path("dataset_finetune")
 
-    #    bins_for_valid = [ x for x in list(pretrain.glob('*')) if x not in pretrain_bins]
-    #    valid_bins = random.sample(bins_for_valid, num_pretrain)
-    #    for bin in valid_bins:
-    #        valid_tot.append(bin)
-    #    finetune_dict[f"VALID_{dir}"] = valid_bins
-    #
-    #print(f"Pretain: {pretrain_tot}")
-    #print(f"Finetuen: {finetune_tot}")
-    #generate_data_src_pretrain_all(pretrain_tot, valid_tot)
-    #generate_data_src_finetune_for_funcbound(finetune_tot)
+        pretrain_and_valid = random.sample(list(pretrain.glob('*')), num_pretrain+num_valid)
+
+        pretrain_bins = pretrain_and_valid[0:num_pretrain]
+        valid_bins = pretrain_and_valid[-num_valid:]
+
+        for bin in pretrain_bins:
+            pretrain_tot.append(bin)
+        pretrain_dict[dir] = pretrain_bins
+
+        finetune_bins = random.sample(list(finetune.glob('*')), num_finetune)
+        for bin in finetune_bins:
+            finetune_tot.append(bin)
+        finetune_dict[dir] = finetune_bins
+
+        #bins_for_valid = [ x for x in list(pretrain.glob('*')) if x not in pretrain_bins]
+        #valid_bins = random.sample(bins_for_valid, num_valid)
+
+        for bin in valid_bins:
+            valid_tot.append(bin)
+        finetune_dict[f"VALID_{dir}"] = valid_bins
+
+        # Copy the bins for pretrain, finetune, and pretrain_valid all to one ouputdir
+        opt_dir = base_saved / dir.name
+        opt_dir.mkdir()
+
+    # so that BiRNN can be trained on the same sample
+
+
+    print(f"Pretain: {pretrain_tot}")
+    print(f"Finetuen: {finetune_tot}")
+    generate_data_src_pretrain_all(pretrain_tot, valid_tot)
+    generate_data_src_finetune_for_funcbound(finetune_tot)
 
     return
 
@@ -875,16 +890,9 @@ def read_log(
     print(f"Prec: {prec}")
     print(f"Recall: {recall}")
     print(f"F1: {f1}")
-
-
-
     return
 
 
-
-
-
-    return
 
 @app.command()
 def raw_test(
@@ -892,6 +900,7 @@ def raw_test(
     checkpoint_dir: Annotated[str, typer.Argument()],
     checkpoint: Annotated[str, typer.Argument()],
     result_path: Annotated[str, typer.Argument()],
+    check_for_existing_results: Annotated[bool, typer.Option()]=True,
     ):
     '''
     Temp test to see how to save raw predictions in pbnz file
@@ -918,20 +927,104 @@ def raw_test(
                                             checkpoint,
                                             'data-bin/funcbound', 
                                             user_dir='finetune_tasks')
+    roberta.cuda()
     roberta.eval()
 
-    for bin_path in inp_bins:
-        # Get the xda res  and save
-        res, runtime= xda_predict_raw(bin_path, roberta)
+    for bin_path in alive_it(inp_bins):
+        print(f"On bin: {bin_path.name}")
+
         single_res_path = res_path.joinpath(f"{bin_path.name}")
-        save_raw_experiment_three_prob( bin_path, runtime, res, single_res_path)
+        if single_res_path.exists() and check_for_existing_results:
+            if all( x in [z.name for z in single_res_path.rglob('*')] for x in ["runtime.txt", f"{bin_path.name}_result.npz"]):
+                print(f"Skipping {bin_path.name}... already done")
+                continue
+            else:
+                #single_res_path.unlink()
+                shutil.rmtree(single_res_path)
+        elif single_res_path.exists():
+            raise Exception("result file already exists, pass arguments to chose to delete the existing path or skip over this experiemtn")
+
+        # Get the xda res  and save
+        #res_generator = xda_predict_raw(bin_path, roberta)
+        tot_res, runtime = xda_predict_raw(bin_path, roberta)
+
+
+        # Check that the dir exists, and is not a file 
+        if single_res_path.exists():
+            if single_res_path.is_file():
+                raise Exception
+        elif not single_res_path.exists():
+            single_res_path.mkdir()
+
+        # Make the sub directory
+        sub_dir = single_res_path.joinpath(bin_path.name)
+        if not sub_dir.exists():
+            sub_dir.mkdir()
+        elif sub_dir.is_file():
+            raise Exception("Subdir is a file")
+
+        # Save the compressed matrix
+        matrix_saved = sub_dir.joinpath(f"{bin_path.name}_result.npz")
+        if matrix_saved.exists():
+            raise Exception("MAtix has been saved")
+        
+        #cur_results = []
+        #for i in range(10000):
+        #    step, runtime = next(res_generator)
+        #    cur_results.append(step)
+
+        #total_res = [x[0] for x in list(res_generator)]
+
+        # Save the first numpy chunk
+        #np.savez(matrix_saved, np.array([x[0] for x in list(res_generator)]))
+        np.savez(matrix_saved, tot_res)
+        # For every 10,000 bytes saze it into its own array 
+        print("saved")
+
+        #TODO: This was an attempt to fix the processing crashing for too many arrays
+
+        #runtime = 0 
+        ##for (data, cur_runtime) in res_generator:
+        #chunks_per_numpy_array = 1000
+        #current_sub_chunk = []
+        #array_indexing = 0
+        #total_numpy_arrays = []
+        #for chunk in iter(lambda: list(itertools.islice((x[0] for x in res_generator), 512)), []):
+        #    #safe_nump_save(data, matrix_saved)
+        #    current_sub_chunk.append(chunk)
+        #    if len(current_sub_chunk) == chunks_per_numpy_array:
+        #        total_numpy_array.append(numpy.array(current_sub_chunk))
+
+
+
+        # Save the runtime
+        runtime_file = sub_dir.joinpath("runtime.txt")
+        with open(runtime_file, 'w') as f:
+            f.write(f"{runtime}")
+
+        #save_raw_experiment_three_prob( bin_path, runtime, res, single_res_path)
     return
+
+def safe_nump_save(data: np.ndarray, npz_file: Path):
+    '''
+    Read the memory mapped npz file to append the data to it 
+    '''
+    #npz_open_file= np.load(npz_file, mmap_mode="r")
+    #npz_data = npz_open_file[list(npz_open_file.keys())[0]]
+    matrix_mmap = np.memmap(npz_file, mode="r+" ),#dtype=npz_data.dtype, shape=npz_data.shape)
+
+    matrix_mmap.resize((matrix_mmap.shape[0] + data.shape[0], matrix_mmap.shape[1]))
+    npz_open_file.close()
+    return
+
+
 
 @app.command()
 def read_bounds_raw(
     input_dir : Annotated[str,typer.Argument()],
     bin_dir: Annotated[str, typer.Argument()],
     verbose: Annotated[bool, typer.Option()] = False,
+    supress_warn: Annotated[bool, typer.Option()] = False,
     ):
     '''
     Read the input dir and compute results using the lief module
@@ -953,7 +1046,6 @@ def read_bounds_raw(
         bins = list(bin_path.glob('*'))
 
     matching_files = {}
-    #for bin in bin_path.glob('*'):
     for bin in bins:
         matching = False
         for res_file in input_path.rglob('*'):
@@ -1040,30 +1132,104 @@ def read_bounds_raw(
 
 
         # Create tuple of the starts to the ends 
-        if len(xda_starts) == len(xda_ends):
-            xda_bounds = np.concatenate((xda_starts.T.reshape(-1,1), xda_ends.T.reshape(-1,1)),axis=1)
-        else:
-            max_length = max(len(xda_starts), len(xda_ends))
-            padded_xda_starts = np.pad(xda_starts, (0, max_length - len(xda_starts)), mode='constant')
-            padded_xda_ends= np.pad(xda_ends, (0, max_length - len(xda_ends)), mode='constant')
-            xda_bounds = np.concatenate((padded_xda_starts.T.reshape(-1,1), padded_xda_ends.T.reshape(-1,1)),axis=1)
-            print("Warning, don't not have the same number of starts and ends")
+        #if len(xda_starts) == len(xda_ends):
+        #    xda_bounds = np.concatenate((xda_starts.T.reshape(-1,1), xda_ends.T.reshape(-1,1)),axis=1)
+        #else:
+        # When we don't have the same number of start predictions as we do end predictions, 
+        # We have the cases:
 
+        # Case 1: Two or more starts in a row 
+        # Case 2: Two or more ends in a row
+
+        # In either case, always take the first predictions
+        
+        # To achieve this, take the two lists of starts and ends,
+        #   | start | end | 
+        #   |  ..   | ..  | 
+        # 
+        # Any convert to a style:
+        # 
+        #  | Addresses | label | 
+        #  |  ..       | start | 
+        #  | ..        | end   | 
+
+        # There, I can iterate through the list, and whenever a second start is read 
+        # or a second end it read, pop it. 
+
+        # 1. Add a column of all 1s for the start addrs, and a column of all 2s for the end addrs
+        all_ones = np.ones((1,len(xda_starts)))
+        #tmp_starts = np.vstack((xda_starts, np.ones((1,len(xda_starts))))).T
+        tmp_starts = np.vstack((xda_starts, all_ones)).T
+
+        all_twos = np.full((1,len(xda_ends)),2)
+        #tmp_ends = np.vstack((xda_ends, np.full((1,len(xda_ends)),2))).T
+        tmp_ends = np.vstack((xda_ends, all_twos)).T
+
+        # 2. Vertically stack the start and end columns and sort by adddress
+        comb =  np.vstack((tmp_starts, tmp_ends))
+        sorted_indices = np.argsort(comb[:, 0])
+        bounds = comb[sorted_indices]
+
+        # 3. Filter any occurancce where theres more than 1 start, or end in a row
+        # Specifically, the following line..
+        #   a. bounds[1:,1] gets the second column excluding the first row
+        #   b. bounds[:,1] gets the second column excluding the last row
+        #   c. Compare these two 
+        #    
+        #  1                                     1
+        #  2   ->   2  !=   1  ->  True    ->    2
+        #  1        1       2      True          1
+        #  1        1       1      False
+
+        if bounds.shape[0] == 0:
+            xda_bounds = np.array([[]])
+        else:
+            indices_to_keep = np.append(True, bounds[1:, 1] != bounds[:-1, 1])
+            filt_sorted_bounds = bounds[indices_to_keep]
+
+            # If the first label is a function end, remove it,
+            # If the last label is a function start, remove it 
+
+            # Check to see if theres no rows,
+            # This would be the case is the first 
+            # prediction is an end and there is only 1 prediction
+            try:
+                if filt_sorted_bounds.shape[0] == 0:
+                    xda_bounds = np.array([[]])
+                else:
+                    if filt_sorted_bounds[0,1] == 2:
+                        filt_sorted_bounds = filt_sorted_bounds[1:,:]
+
+                    if filt_sorted_bounds.shape[0] == 0:
+                        xda_bounds = np.array([[]])
+                    elif filt_sorted_bounds[-1,1] == 1:
+                        filt_sorted_bounds = filt_sorted_bounds[:-1,:]
+                    # Lastly, combine the start and ends array to make matrix:   | start | end |
+                        starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
+                        ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
+                        xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
+            except Exception as e:
+                print(filt_sorted_bounds.shape)
+                raise(e)
+                
+
+        if total_start_conf.tp == 0:
+            np.save("TMP_XDA_BOUINDS", xda_bounds)
+            np.save("TMP_GND_M", gnd_matrix)
 
         # 6 - Compare the ends
-        bound_conf.tp=len(np.intersect1d(gnd_matrix, xda_bounds))
-        bound_conf.fp=len(np.setdiff1d( xda_bounds, gnd_matrix ))
-        bound_conf.fn=len(np.setdiff1d(gnd_matrix, xda_bounds))
+        #bound_conf.tp=len(np.intersect1d(gnd_matrix, xda_bounds))
+        #bound_conf.fp=len(np.setdiff1d( xda_bounds, gnd_matrix ))
+        #bound_conf.fn=len(np.setdiff1d(gnd_matrix, xda_bounds))
+        bound_conf.tp = np.count_nonzero(np.all(np.isin(xda_bounds, gnd_matrix),axis=1))
+        bound_conf.fp = xda_bounds.shape[0] - bound_conf.tp
+        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
 
         debug = True
         if debug:
-            max_length = max(len(xda_starts), len(xda_ends))
-            padded_xda_starts = np.pad(xda_starts, (0, max_length - len(xda_starts)), mode='constant')
-            padded_xda_ends= np.pad(xda_ends, (0, max_length - len(xda_ends)), mode='constant')
-            padded_xda_bounds = np.concatenate((padded_xda_starts.T.reshape(-1,1), padded_xda_ends.T.reshape(-1,1)),axis=1)
             with open("XDA_FUNCS_BOUND",'w') as f:
-                for row in padded_xda_bounds:
+                for row in xda_bounds:
                     f.write(f"{row}\n")
             with open("GND_MATRIX",'w') as f:
                 for row in gnd_matrix:
@@ -1104,8 +1270,13 @@ def read_bounds_raw(
             print(f"binary: {bin.name}")
             print(f"Starts: {start_conf}")
             print(f"Starts Metrics: {calc_metrics(start_conf)}")
-            print(f"Ends Metrics: {calc_metrics(start_conf)}")
+
+            print(f"Ends : {end_conf}")
+            print(f"Ends Metrics: {calc_metrics(end_conf)}")
+
+            print(f"Bounds: {bound_conf}")
             print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
+
     print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
     print(f"Ends Metrics: {calc_metrics(total_end_conf)}")
     print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
@@ -1123,34 +1294,34 @@ def read_xda_npz(inp: Path)->np.ndarray:
 
 
 
-@app.command()
-def test(
-        inp_dir: Annotated[str, typer.Argument()],
-        out_dir: Annotated[str, typer.Argument()],
-        checkpoint_dir: Annotated[str, typer.Argument()],
-        checkpoint: Annotated[str, typer.Argument()],
-        ):
-    '''
-    Test XDA on a set of binaries.
-    '''
-
-
-    # Make a list of the input file 
-    test_files = [x.resolve() for x in Path(inp_dir).resolve().rglob('*')]
-
-    out_path = Path(out_dir)
-    if not out_path.exists():
-        out_path.mkdir()
-
-    # Load our model
-    roberta = RobertaModel.from_pretrained(checkpoint_dir, 
-                                        checkpoint,
-                                        'data-bin/funcbound', 
-                                        user_dir='finetune_tasks')
-    roberta.eval()
-    results = xda_predict_many(test_files, roberta, out_path.resolve(), save_results=True)
-
-    return
+#@app.command()
+#def test(
+#        inp_dir: Annotated[str, typer.Argument()],
+#        out_dir: Annotated[str, typer.Argument()],
+#        checkpoint_dir: Annotated[str, typer.Argument()],
+#        checkpoint: Annotated[str, typer.Argument()],
+#        ):
+#    '''
+#    Test XDA on a set of binaries.
+#    '''
+#
+#
+#    # Make a list of the input file 
+#    test_files = [x.resolve() for x in Path(inp_dir).resolve().rglob('*')]
+#
+#    out_path = Path(out_dir)
+#    if not out_path.exists():
+#        out_path.mkdir()
+#
+#    # Load our model
+#    roberta = RobertaModel.from_pretrained(checkpoint_dir, 
+#                                        checkpoint,
+#                                        'data-bin/funcbound', 
+#                                        user_dir='finetune_tasks')
+#    roberta.eval()
+#    results = xda_predict_many(test_files, roberta, out_path.resolve(), save_results=True)
+#
+#    return
 
 if __name__ == '__main__':
     app()
