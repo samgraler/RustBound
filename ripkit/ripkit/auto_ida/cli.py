@@ -1,4 +1,5 @@
 import typer 
+from math import floor
 from scipy import stats
 import shutil
 import os
@@ -33,7 +34,7 @@ from ripkit.ripbin import (
 
 
 console = Console()
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
 
 def generate_ida_cmd(
         binary: Path,
@@ -69,63 +70,6 @@ def generate_ida_cmd_bounds(binary: Path, logfile: Path):
     bound_list = bound_list.resolve()
     clear_cmd = f"rm {binary.resolve()}.i64"
     return generate_ida_cmd(binary, logfile, bound_list), clear_cmd
-
-#def new_file_super_careful_callback(inp_bin: str)->Path:
-#    '''
-#    Assert that nothing exists at the new file location
-#    '''
-#    if Path(inp_bin).exists():
-#        raise typer.BadParameter(f"Path {inp_bin} already exists")
-#    return Path(inp_bin)
-#
-#def new_file_callback(inp_bin: str)->Path:
-#    '''
-#    Assert that the location for the new file does not exist as a 
-#    directory. This WILL overwrite existing files with the same name
-#    '''
-#
-#    if Path(inp_bin).is_dir():
-#        raise typer.BadParameter(f"File {inp_bin} already exists and is a directory!")
-#    return Path(inp_bin)
-#
-#def must_be_file_callback(inp_bin: str)->Path:
-#    '''
-#    Callback to guarentee a file exists
-#    '''
-#    if Path(inp_bin).is_file():
-#        return Path(inp_bin)
-#    raise typer.BadParameter("Must must a valid file")
-#
-#def iterable_path_shallow_callback(inp_dir: str)->List[Path]:
-#    '''
-#    Callback for iterable paths 
-#
-#    This is useful when a parameter can be a file or a directory of files
-#    '''
-#    inp_path = Path(inp_dir)
-#
-#    if inp_path.is_file():
-#        return [inp_path]
-#    elif inp_path.is_dir():
-#        return list(x for x in inp_path.glob('*'))
-#    else: 
-#        raise typer.BadParameter("Must pass a file or directory path")
-#
-#
-#def iterable_path_deep_callback(inp_dir: str)->List[Path]:
-#    '''
-#    Callback for iterable paths 
-#
-#    This is useful when a parameter can be a file or a directory of files
-#    '''
-#    inp_path = Path(inp_dir)
-#
-#    if inp_path.is_file():
-#        return [inp_path]
-#    elif inp_path.is_dir():
-#        return [Path(x) for x in inp_path.rglob('*')]
-#    raise typer.BadParameter("Must pass a file or directory path")
-
 
 
 def make_ida_cmd(binary: Path, logfile: Path):
@@ -277,7 +221,7 @@ def get_ida_bounds(file: Path, strip: bool):
         start = time.time()
         # Run the command to run ida 
         res = subprocess.check_output(cmd,shell=True)
-        print(res)
+        #print(res)
         runtime = time.time() - start
     except Exception as e:
         raise(e)
@@ -423,6 +367,7 @@ class func_incorrect_lens:
     correct_lens: List[int]
 
 
+
 @app.command()
 def inspect_many_results(
     results: Annotated[str,typer.Argument(
@@ -452,7 +397,10 @@ def inspect_many_results(
 
     # Observe the tp func starts but the incorrect lengths
     tot_missed_ends = func_incorrect_lens([],[],[])
-    for bin_path in alive_it(bins):
+    # Observe the fp where the start was fp and the end was wrogn
+    tot_missed_both = completely_missed_fp([],[],[],[])
+ 
+    for bin_path, result_path in matching_files.items():
 
         # 1  - Ground truth for bin file 
         gnd_truth = lief_gnd_truth(bin_path.resolve())
@@ -462,7 +410,7 @@ def inspect_many_results(
         # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
         #     are out-of-bounds of the lief functions (these are functions that are
         #       likely outside of the .text section)
-        ida_funcs = read_ida_npz(matching_files[bin_path])
+        ida_funcs = read_ida_npz(result_path)
 
         # 4 - Mask the array so we only include bytes in .text
         mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
@@ -471,39 +419,122 @@ def inspect_many_results(
         mask_min = (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs))
         filt_ida_funcs = ida_funcs[mask_min]
 
-
         # Check to see how many false negative there were 
         for i, row in enumerate(gnd_matrix):
+
+            # If the boudns are exauasted these are all false negatives
+            if i >= filt_ida_funcs.shape[0]:
+                continue
+                
             if row[0] == filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
                 tot_missed_ends.tp_start_addrs.append(row[0])
                 tot_missed_ends.incorrect_lens.append(filt_ida_funcs[i][1])
                 tot_missed_ends.correct_lens.append(row[1])
-            #if row[0] != filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
-            #    missed_both.start_addrs.append(row[0])
-            #    missed_both.lengths.append(filt_ida_funcs[i][1])
+            if row[0] != filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
+                tot_missed_both.start_addrs.append(row[0])
+                tot_missed_both.lengths.append(filt_ida_funcs[i][1])
 
-    ends_missed_length = [x-y for (x,y) in zip(tot_missed_ends.correct_lens, tot_missed_ends.incorrect_lens)]
-    total_missed_by = sum(ends_missed_length)
-
-
-    print(f"Total miss length {total_missed_by}")
-    avg_missed_ends = total_missed_by / len(tot_missed_ends.incorrect_lens)
+    tot_ends_missed_length = [y-x for (x,y) in zip(tot_missed_ends.correct_lens, tot_missed_ends.incorrect_lens)]
+ 
+    print(f"Total miss length {sum(tot_ends_missed_length)}")
+    avg_missed_ends = sum(tot_ends_missed_length) / len(tot_ends_missed_length)
     print(f"Avg missed {avg_missed_ends}")
-    print(f"Mean: {np.mean(ends_missed_length)}")
-    print(f"Median: {np.median(ends_missed_length)}")
-    print(f"Mode: {stats.mode(ends_missed_length)}")
+    print(f"Mean: {np.mean(tot_ends_missed_length)}")
+    print(f"Median: {np.median(tot_ends_missed_length)}")
+    print(f"Mode: {stats.mode(tot_ends_missed_length)}")
+ 
 
-    freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
+    make_simple_plot(tot_missed_ends.tp_start_addrs, tot_ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", f"Distance between predicted functions ends and correct function ends vs TP start addres for binary {bin_path.name}",Path(f"{bin_path.name}_ends_plot.png") )
 
-    print(f"Bins edges: {bin_edges}")
-    print(f"Count: {freqs}")
-
-    make_simple_plot(tot_missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", "O1 IDA missed by amoutns" , graph_path )
-
-    make_simple_pdf(tot_missed_ends.tp_start_addrs, ends_missed_length, "Bins", "Frequency", "PDF" , Path(f"{graph_path.name}_pdf_graph") )
-
-
+    make_simple_pdf(tot_ends_missed_length, "Distribution of FP distance from TP", "Frequency", f"PDF of FP delta TP ", Path(graph_path) )
     return
+
+
+
+
+#@app.command()
+#def inspect_many_results(
+#    results: Annotated[str,typer.Argument(
+#                callback=iterable_path_deep_callback)],
+#    bins: Annotated[str,typer.Argument(
+#                callback=iterable_path_shallow_callback)],
+#    graph_path: Annotated[str, typer.Argument(
+#                callback=new_file_callback
+#                    )],
+#    ):
+#    '''
+#    Inspect many results, specifically examine correct function 
+#    starts that had incorrect lengths
+#    '''
+#
+#    matching_files = {}
+#    results = [x for x in results if x.is_file() and "result.npz" in x.name]
+#
+#    for bin_path in bins:
+#        matching = False
+#        for res_file in [x for x in results ]:
+#            if res_file.name.replace("_result.npz","") == bin_path.name:
+#                matching_files[bin_path] = res_file
+#                matching = True
+#        if not matching:
+#            raise typer.Abort("Some bins dont have matching result files")
+#
+#    # Observe the tp func starts but the incorrect lengths
+#    tot_missed_ends = func_incorrect_lens([],[],[])
+#    for bin_path in alive_it(bins):
+#
+#        # 1  - Ground truth for bin file 
+#        gnd_truth = lief_gnd_truth(bin_path.resolve())
+#        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+#                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+#
+#        # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
+#        #     are out-of-bounds of the lief functions (these are functions that are
+#        #       likely outside of the .text section)
+#        ida_funcs = read_ida_npz(matching_files[bin_path])
+#
+#        # 4 - Mask the array so we only include bytes in .text
+#        mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
+#        ida_funcs = ida_funcs[mask_max]
+#
+#        mask_min = (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs))
+#        filt_ida_funcs = ida_funcs[mask_min]
+#
+#
+#        # Check to see how many false negative there were 
+#        for i, row in enumerate(gnd_matrix):
+#            if i >= filt_ida_funcs.shape[0]:
+#                continue
+#            if row[0] == filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
+#                tot_missed_ends.tp_start_addrs.append(row[0])
+#                tot_missed_ends.incorrect_lens.append(filt_ida_funcs[i][1])
+#                tot_missed_ends.correct_lens.append(row[1])
+#            #if row[0] != filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
+#            #    missed_both.start_addrs.append(row[0])
+#            #    missed_both.lengths.append(filt_ida_funcs[i][1])
+#
+#    ends_missed_length = [x-y for (x,y) in zip(tot_missed_ends.correct_lens, tot_missed_ends.incorrect_lens)]
+#    total_missed_by = sum(ends_missed_length)
+#
+#
+#    print(f"Total miss length {total_missed_by}")
+#    avg_missed_ends = total_missed_by / len(tot_missed_ends.incorrect_lens)
+#    print(f"Avg missed {avg_missed_ends}")
+#    print(f"Mean: {np.mean(ends_missed_length)}")
+#    print(f"Median: {np.median(ends_missed_length)}")
+#    print(f"Mode: {stats.mode(ends_missed_length)}")
+#
+#    freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
+#
+#    print(f"Bins edges: {bin_edges}")
+#    print(f"Count: {freqs}")
+#
+#    make_simple_plot(tot_missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", "O1 IDA missed by amoutns" , graph_path )
+#
+#    make_simple_pdf(tot_missed_ends.tp_start_addrs, ends_missed_length, "Bins", "Frequency", "PDF" , Path(f"{graph_path.name}_pdf_graph_of_all_results") )
+#
+#
+#    return
 
 
 @app.command()
@@ -559,12 +590,9 @@ def inspect_single_results(
         print(f"{filt_ida_funcs.shape[0]}")
         raise Exception
 
-    # Check the predicted bounds for correctness
-    for row in filt_ida_funcs:
-        if np.any(np.all(row == gnd_matrix, axis=1)): 
-            bound_conf.tp+=1
-        else:
-            bound_conf.fp+=1
+    bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_ida_funcs, gnd_matrix),axis=1))
+    bound_conf.fp = filt_ida_funcs.shape[0] - bound_conf.tp
+    bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
     # Observe the tp func starts but the incorrect lengths
     missed_ends = func_incorrect_lens([],[],[])
@@ -592,7 +620,7 @@ def inspect_single_results(
         if not np.any(np.all(row == filt_ida_funcs, axis=1)):
             bound_conf.fn+=1
 
-    ends_missed_length = [x-y for (x,y) in zip(missed_ends.correct_lens, missed_ends.incorrect_lens)]
+    ends_missed_length = [y-x for (x,y) in zip(missed_ends.correct_lens, missed_ends.incorrect_lens)]
     total_missed_by = sum(ends_missed_length)
 
     print(f"Function start confusion matrix: {start_conf}")
@@ -605,13 +633,9 @@ def inspect_single_results(
     print(f"Median: {np.median(ends_missed_length)}")
     print(f"Mode: {stats.mode(ends_missed_length)}")
 
-    freqs, bin_edges = np.histogram(ends_missed_length, bins=8)
-    print(f"Bins edges: {bin_edges}")
-    print(f"Count: {freqs}")
-
     make_simple_plot(missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", f"Distance between predicted functions ends and correct function ends vs TP start addres for binary {bin_path.name}",Path(f"{bin_path.name}_ends_plot.png") )
 
-    make_simple_pdf(missed_ends.tp_start_addrs, ends_missed_length, "Distribution of FP distance from TP", "Frequency", f"PDF of FP delta TP for {bin_path.name}",Path(f"{bin_path.name}_ends_pdf.png") )
+    make_simple_pdf(ends_missed_length, "Distribution of FP distance from TP", "Frequency", f"PDF of FP delta TP for {bin_path.name}",Path(f"{bin_path.name}_ends_pdf.png") )
 
     return
 
@@ -632,7 +656,7 @@ def make_simple_plot(x,y, label_x:str, label_y:str, title:str, save_path:Path):
     plt.savefig(save_path)
     return
 
-def make_simple_pdf(x,y, label_x: str, label_y: str, title:str, save_path: Path):
+def make_simple_pdf(y, label_x: str, label_y: str, title:str, save_path: Path):
     '''
     Make a simple probability density graph
     '''
@@ -640,21 +664,27 @@ def make_simple_pdf(x,y, label_x: str, label_y: str, title:str, save_path: Path)
     y = np.array(y)
 
     # Define the bin size
-    bin_size = 4
-    
+    bin_size = 32
+    num_bins = int(np.ceil((max(y)- min(y)) / bin_size))
+
     # Calculate the histogram
-    hist, bins = np.histogram(y, bins=np.arange(min(y), max(y) + bin_size, bin_size))
+    #hist, bins = np.histogram(y, bins=np.arange(min(y), max(y) + bin_size, bin_size))
+    freqs, bin_edges = np.histogram(y, bins=num_bins)
+    print(f"Frequeness: {freqs}")
+    print(f"Bin Edges: {bin_edges}")
+
     
     # Plot the histogram
-    plt.bar(bins[:-1], hist, width=bin_size, align='center')
+    plt.bar(bin_edges[:-1], freqs, width=bin_size, align='center')
     
     # Set the x-axis to have its center at 0
-    plt.xlim(-max(abs(y)), max(abs(y)))
+    plt.xlim(-2000, 128 ) #max(abs(y))-.8*max(abs(y)))
+    plt.ylim(0, sorted(freqs)[-3] + .1*(sorted(freqs)[-3]))
     
     # Add labels and title
     plt.xlabel(label_x)
     plt.ylabel(label_y)
-    plt.title(title)
+    plt.title("PDF graph")
 
     #print(f"Total miss length {total_missed_by}")
     #avg_missed_ends = total_missed_by / len(tot_missed_ends.incorrect_lens)
@@ -663,10 +693,7 @@ def make_simple_pdf(x,y, label_x: str, label_y: str, title:str, save_path: Path)
     #print(f"Median: {np.median(ends_missed_length)}")
     #print(f"Mode: {stats.mode(ends_missed_length)}")
 
-    freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
-
-
-
+    #freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
 
 
         # Define bin size
@@ -788,17 +815,20 @@ def read_results(
             print(f"{filt_ida_funcs.shape[0]}")
             raise Exception
 
-        # Check the predicted bounds for correctness
+
+        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_ida_funcs, gnd_matrix),axis=1))
+
+
+
+        ## The above is a test of an old code implementation ^^
+
+
         for row in filt_ida_funcs:
             if np.any(np.all(row == gnd_matrix, axis=1)): 
                 bound_conf.tp+=1
-            else:
-                bound_conf.fp+=1
 
-        # Check to see how many false negative there were 
-        for row in gnd_matrix:
-            if not np.any(np.all(row == filt_ida_funcs, axis=1)):
-                bound_conf.fn+=1
+        bound_conf.fp = filt_ida_funcs.shape[0] - bound_conf.tp
+        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
         total_bytes += gnd_truth.num_bytes
 

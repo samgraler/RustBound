@@ -22,7 +22,7 @@ from rich.table import Table
 from rich.progress import track
 
 console = Console()
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
 app.add_typer(ghid_bench.app, name="ghidra")
 app.add_typer(ida_bench.app, name="ida")
 

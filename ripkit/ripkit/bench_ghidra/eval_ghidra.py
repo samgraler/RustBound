@@ -442,11 +442,13 @@ def read_bounds_raw(
 
     total_start_conf = ConfusionMatrix(0,0,0,0)
     total_bound_conf = ConfusionMatrix(0,0,0,0)
+    tmp_total_bound_conf = ConfusionMatrix(0,0,0,0)
     total_bytes = 0
 
     for bin in alive_it(list(matching_files.keys())):
         # Init the confusion matrix for this bin
         start_conf = ConfusionMatrix(0,0,0,0)
+        bound_conf = ConfusionMatrix(0,0,0,0)
         bound_conf = ConfusionMatrix(0,0,0,0)
 
 
@@ -498,23 +500,66 @@ def read_bounds_raw(
             print(f"{filt_offset_funcs.shape[0]}")
             raise Exception
 
+        # Small recap: 
+        # GND_TRUTH = | addr | len 
+        #             | ...  | ... 
+        # 
 
-        bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_offset_funcs, gnd_matrix),axis=1))
-        bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
-        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+        # BUG!!! This DOES NOT work correctly:
+        # Example to show the incorrectness:
+        #   predicted = [[1  2]
+        #                [3  4]
+        #   target    = [[1  4]
+        #                [3  2]
+        #  The below would count that as 2 TP!! This is beacuse the isin
+        #   function does not consider is the WHOLE ROW is in the vector, but
+        #   rather only considerrs if a single value is in it 
 
+        # TP is every common row between gnd turth and pred
+        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_offset_funcs, gnd_matrix),axis=1))
+
+        ## FP = Total number of functions in pred - tp
+        #bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
+        ## FN = Total number of functions in ground - tp
+        #bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+
+        #print(f"GROUND SHAPE: {gnd_matrix.shape}")
+        #print(f"PRED SHAPE: {filt_offset_funcs.shape}")
+        #print(f"BOUND TP+FP: {bound_conf.tp+bound_conf.fp}")
+        #print(f"BOUND TP+FN: {bound_conf.tp+bound_conf.fn}")
 
         # Check the predicted bounds for correctness
-        #for row in filt_offset_funcs:
-        #    if np.any(np.all(row == gnd_matrix, axis=1)): 
-        #        bound_conf.tp+=1
-        #    else:
-        #        bound_conf.fp+=1
+        for row in filt_offset_funcs:
+            if np.any(np.all(row == gnd_matrix, axis=1)): 
+                bound_conf.tp+=1
+            #else:
+            #    bound_conf.fp+=1
+        # FP = Total number of functions in pred - tp
+        bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
+        # FN = Total number of functions in ground - tp
+        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
-        ## Check to see how many false negative there were 
+        # Check to see how many false negative there were 
         #for row in gnd_matrix:
         #    if not np.any(np.all(row == filt_offset_funcs, axis=1)):
         #        bound_conf.fn+=1
+
+        # More sanity checks for bounds
+        # tp + fn = total pos
+        if not bound_conf.tp + bound_conf.fn == gnd_matrix.shape[0]:
+            print(f"{bound_conf.fp}")
+            print(f"{bound_conf.fn}")
+            print(f"{filt_offset_funcs.shape}")
+            print(f"{gnd_matrix.shape}")
+            raise Exception
+
+        # fp + tp = total predictin
+        if not bound_conf.tp + bound_conf.fp == filt_offset_funcs.shape[0]:
+            print(f"{bound_conf.fp}")
+            print(f"{bound_conf.fn}")
+            print(f"{filt_offset_funcs.shape}")
+            print(f"{gnd_matrix.shape}")
+            raise Exception
 
         total_bytes += gnd_truth.num_bytes
 
@@ -538,7 +583,8 @@ def read_bounds_raw(
     print(f"Starts: {calc_metrics(total_start_conf)}")
     print(f"Bounds: {total_bound_conf}")
     print(f"Bounds: {calc_metrics(total_bound_conf)}")
-
+    print(f"TMP Bounds: {tmp_total_bound_conf}")
+    print(f"TMP Bounds: {calc_metrics(tmp_total_bound_conf)}")
     return 
 
 def read_ghid_npz(inp: Path)->np.ndarray:
