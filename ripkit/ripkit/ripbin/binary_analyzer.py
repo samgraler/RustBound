@@ -35,6 +35,8 @@ class GroundTruth:
     func_lens: np.ndarray
     func_names: List[str]
     num_bytes: int
+    text_first_addr: int
+    text_last_addr: int
 
 @dataclass
 class ConfusionMatrix:
@@ -83,6 +85,7 @@ def lief_gnd_truth(bin_path: Path):
     func_addrs = []
     func_names = []
     func_lengths = []
+    first_addr = base_address + text_section.virtual_address
 
     # This enumerate the .text byte and sees which ones are functions
     for i, _ in enumerate(text_bytes):
@@ -92,10 +95,14 @@ def lief_gnd_truth(bin_path: Path):
             func_names.append(func_start_addrs[address][0])
             func_lengths.append(func_start_addrs[address][1])
 
+    last_addr = first_addr + len(text_bytes)
+
     # Return the addrs and names 
     func_addrs = np.array(func_addrs)
     func_lens = np.array(func_lengths)
-    return GroundTruth(func_addrs, func_lens, func_names, len(text_bytes))
+    return GroundTruth(func_addrs, func_lens, 
+                       func_names, len(text_bytes),
+                       first_addr, last_addr)
 
 def save_func_start_and_length(data:np.ndarray, save_path: Path):
     '''

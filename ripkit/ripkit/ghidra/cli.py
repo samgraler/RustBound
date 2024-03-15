@@ -31,6 +31,11 @@ import sys
 sys.path.append (
     str(ripkit_dir)
 )
+from ripkit.score import (
+    score_start_plus_len,
+    load_ghidra_prediction,
+    gnd_truth_start_plus_len,
+)
 from ripkit.ripbin import (
     FoundFunctions,
     calc_metrics,
@@ -38,6 +43,8 @@ from ripkit.ripbin import (
     lief_gnd_truth,
     get_functions,
     save_raw_experiment,
+    iterable_path_shallow_callback,
+    iterable_path_deep_callback,
 )
 
 app = typer.Typer()
@@ -404,361 +411,425 @@ def get_ghid_bounds(bin_path, ghidra_flags, use_offset:bool, strip_the_bin: bool
 #
 #    return same, lief_only, ghid_only, runtime
 
-
 @app.command()
-def read_bounds_raw(
-    input_dir : Annotated[str,typer.Argument()],
-    bin_dir: Annotated[str, typer.Argument()],
+def read_results(
+    result_dir: Annotated[str,typer.Argument(
+        callback = iterable_path_deep_callback
+                )],
+    bin_dir: Annotated[str, typer.Argument(
+        callback = iterable_path_shallow_callback
+                )],
     verbose: Annotated[bool, typer.Option()] = False,
     ):
     '''
-    Read the input dir and compute results using the lief module
+    Read the results from the input dir
     '''
 
-    input_path = Path(input_dir)
-    if not input_path.exists(): 
-        print(f"Inp dir {input_dir} is not a dir")
-        return
-
-    bin_path = Path(bin_dir)
-    if not bin_path.exists():
-        print(f"Bin dir {bin_dir} is not a dir")
-        return
-
     matching_files = {}
-    for bin in bin_path.glob('*'):
-        for res_file in input_path.rglob('*'):
+    for bin in bin_dir:
+        for res_file in result_dir:
             if ".npz" not in res_file.name:
                 continue
             elif res_file.name.replace("_result.npz","") == bin.name:
                 matching_files[bin] = res_file
 
-    if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
-        print(f"Num matching files {len(matching_files.keys())}")
-        print(f"Num bins in path {len(list(bin_path.glob('*')))}")
-        print(f"Some bins don't have matching result file")
+    if len(matching_files.keys()) != len(bin_dir):
+        print("Some bins don't have matching result file")
         raise Exception
-
 
     total_start_conf = ConfusionMatrix(0,0,0,0)
     total_bound_conf = ConfusionMatrix(0,0,0,0)
-    tmp_total_bound_conf = ConfusionMatrix(0,0,0,0)
-    total_bytes = 0
+    total_end_conf = ConfusionMatrix(0,0,0,0)
 
     for bin in alive_it(list(matching_files.keys())):
-        # Init the confusion matrix for this bin
-        start_conf = ConfusionMatrix(0,0,0,0)
-        bound_conf = ConfusionMatrix(0,0,0,0)
-        bound_conf = ConfusionMatrix(0,0,0,0)
+
+        # 1. Load gnd truth
+        gnd_info, gnd = gnd_truth_start_plus_len(bin)
+
+        # 2. Load prediction
+        pred = load_ghidra_prediction(matching_files[bin], gnd)
+
+        # 3. Score the prediction
+        start_conf, end_conf, bound_conf = score_start_plus_len(gnd, pred, gnd_info.text_first_addr, 
+                                                                gnd_info.text_last_addr)
+
+        # Update the total start conf
+        total_start_conf.tp+= start_conf.tp
+        total_start_conf.fp+= start_conf.fp
+        total_start_conf.fn+= start_conf.fn
+
+        # Update the total start conf
+        total_end_conf.tp+= end_conf.tp
+        total_end_conf.fp+= end_conf.fp
+        total_end_conf.fn+= end_conf.fn
 
 
-        # 1  - Ground truth for bin file 
-        gnd_truth = lief_gnd_truth(bin.resolve())
-        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
-
-
-        # 2 - Find the npz with the ghidra funcs and addrs, chop of functions that 
-        #     are out-of-bounds of the lief functions (these are functions that are
-        #       likely outside of the .text section)
-        ghid_funcs = read_ghid_npz(matching_files[bin])
-
-        # 3 - Apply the offset to the ghidra funcs
-        offset = find_offset(sorted(gnd_matrix[:,0].tolist()), 
-                             sorted((ghid_funcs[:,0].tolist())))
-
-        offset_funcs = ghid_funcs.copy()
-        offset_funcs[:,0] += offset
-
-        # 4 - Mask the array so we only include bytes in .text
-        mask = ((ghid_funcs[:,0] <= np.max(gnd_truth.func_addrs)) & 
-                    ghid_funcs[:,0] >= np.min(gnd_truth.func_addrs))
-        filt_ghid_funcs= ghid_funcs[mask]
-
-        mask = ((offset_funcs[:,0]  < np.max(gnd_truth.func_addrs)) & 
-                    (offset_funcs[:,0] >  np.min(gnd_truth.func_addrs)))
-        filt_offset_funcs = offset_funcs[mask]
-
-        # 3 - Compare the two lists
-
-        # Get all the start addrs that are in both, in ghid only, in gnd_trush only
-        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], filt_offset_funcs[:,0]))
-        start_conf.fp=len(np.setdiff1d( filt_offset_funcs[:,0], gnd_matrix[:,0] ))
-        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], filt_offset_funcs[:,0]))
-
-        # tp + fp = Total predicted
-        if not start_conf.tp + start_conf.fp == filt_offset_funcs.shape[0]:
-            print(f"{start_conf.tp}")
-            print(f"{start_conf.fp}")
-            print(f"{filt_offset_funcs.shape[0]}")
-            raise Exception
-
-        # tp + fn = total pos
-        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
-            print(f"{start_conf.fp}")
-            print(f"{start_conf.fn}")
-            print(f"{filt_offset_funcs.shape[0]}")
-            raise Exception
-
-        # Small recap: 
-        # GND_TRUTH = | addr | len 
-        #             | ...  | ... 
-        # 
-
-        # BUG!!! This DOES NOT work correctly:
-        # Example to show the incorrectness:
-        #   predicted = [[1  2]
-        #                [3  4]
-        #   target    = [[1  4]
-        #                [3  2]
-        #  The below would count that as 2 TP!! This is beacuse the isin
-        #   function does not consider is the WHOLE ROW is in the vector, but
-        #   rather only considerrs if a single value is in it 
-
-        # TP is every common row between gnd turth and pred
-        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_offset_funcs, gnd_matrix),axis=1))
-
-        ## FP = Total number of functions in pred - tp
-        #bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
-        ## FN = Total number of functions in ground - tp
-        #bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
-
-        #print(f"GROUND SHAPE: {gnd_matrix.shape}")
-        #print(f"PRED SHAPE: {filt_offset_funcs.shape}")
-        #print(f"BOUND TP+FP: {bound_conf.tp+bound_conf.fp}")
-        #print(f"BOUND TP+FN: {bound_conf.tp+bound_conf.fn}")
-
-        # Check the predicted bounds for correctness
-        for row in filt_offset_funcs:
-            if np.any(np.all(row == gnd_matrix, axis=1)): 
-                bound_conf.tp+=1
-            #else:
-            #    bound_conf.fp+=1
-        # FP = Total number of functions in pred - tp
-        bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
-        # FN = Total number of functions in ground - tp
-        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
-
-        # Check to see how many false negative there were 
-        #for row in gnd_matrix:
-        #    if not np.any(np.all(row == filt_offset_funcs, axis=1)):
-        #        bound_conf.fn+=1
-
-        # More sanity checks for bounds
-        # tp + fn = total pos
-        if not bound_conf.tp + bound_conf.fn == gnd_matrix.shape[0]:
-            print(f"{bound_conf.fp}")
-            print(f"{bound_conf.fn}")
-            print(f"{filt_offset_funcs.shape}")
-            print(f"{gnd_matrix.shape}")
-            raise Exception
-
-        # fp + tp = total predictin
-        if not bound_conf.tp + bound_conf.fp == filt_offset_funcs.shape[0]:
-            print(f"{bound_conf.fp}")
-            print(f"{bound_conf.fn}")
-            print(f"{filt_offset_funcs.shape}")
-            print(f"{gnd_matrix.shape}")
-            raise Exception
-
-        total_bytes += gnd_truth.num_bytes
-
-        total_start_conf.tp += start_conf.tp
-        total_start_conf.fp += start_conf.fp
-        total_start_conf.fn += start_conf.fn
-
-        total_bound_conf.tp += bound_conf.tp
-        total_bound_conf.fp += bound_conf.fp
-        total_bound_conf.fn += bound_conf.fn
-
-        if verbose:
-            print(f"binary: {bin.name}")
-            print(f"Starts: {start_conf}")
-            print(f"Metrics: {calc_metrics(start_conf)}")
-            print(f"Bounds: {bound_conf}")
-            print(f"Metrics: {calc_metrics(bound_conf)}")
+        # Update the total start conf
+        total_bound_conf.tp+= bound_conf.tp
+        total_bound_conf.fp+= bound_conf.fp
+        total_bound_conf.fn+= bound_conf.fn
 
     print(f"Total Metrics")
     print(f"Starts: {total_start_conf}")
     print(f"Starts: {calc_metrics(total_start_conf)}")
     print(f"Bounds: {total_bound_conf}")
     print(f"Bounds: {calc_metrics(total_bound_conf)}")
-    print(f"TMP Bounds: {tmp_total_bound_conf}")
-    print(f"TMP Bounds: {calc_metrics(tmp_total_bound_conf)}")
-    return 
-
-def read_ghid_npz(inp: Path)->np.ndarray:
-    '''
-    Read the ghid npz
-    '''
-    npz_file = np.load(inp)
-    return npz_file[list(npz_file.keys())[0]].astype(int)
-
-@app.command()
-def read_comparison_file(
-    input : Annotated[str,typer.Argument()],
-    list_fn: Annotated[bool, typer.Option(help="List the false neg's")] = False,
-    list_fp: Annotated[bool, typer.Option(help="List the false pos's")] = False,
-    ):
-    '''
-    Read a single comparison file
-    '''
-
-    # Read the file if it exists
-    if not (file:=Path(input)).exists():
-        return
-    else:
-        with open(file, 'r') as f:
-            data = json.load(f)
-
-    if data == {}:
-        print(f"No data in file {file}")
-        return
-
-
-    # Read in the results 
-    tp = len(data['same'])
-    fp = len(data['ghid_only'])
-    fn = len(data['lief_only'])
-    filesize = data['filesize']
-    runtime = data['runtime']
-
-
-    if list_fn:
-        print("FN | int | hex")
-        for addr in data['lief_only']:
-            print(f"FN | {addr} | {hex(addr)}")
-
-    if list_fp:
-        print("FP | int | hex")
-        for addr in data['ghid_only']:
-            print(f"FP | {addr} | {hex(addr)}")
-
-    print(f"BPS: {filesize / runtime}")
-
-    if tp > 0:
-        prec = tp/(tp+fp)
-        recall = tp/(tp+fn)
-        f1 = 2 * prec* recall / (prec+recall)
-
-        print(f"Prec: {prec}")
-        print(f"Recall: {recall}")
-        print(f"F1 : {f1}")
-    else:
-        print(f"Analyzed tp is 0")
     return
 
-@app.command()
-def read_comparison_dir(
-    dir : Annotated[str,typer.Argument()],
-    ):
+#TODO: DELETE ME 
+#@app.command()
+#def read_bounds_raw(
+#    input_dir : Annotated[str,typer.Argument()],
+#    bin_dir: Annotated[str, typer.Argument()],
+#    verbose: Annotated[bool, typer.Option()] = False,
+#    ):
+#    '''
+#    Read the input dir and compute results using the lief module
+#    '''
+#
+#    input_path = Path(input_dir)
+#    if not input_path.exists(): 
+#        print(f"Inp dir {input_dir} is not a dir")
+#        return
+#
+#    bin_path = Path(bin_dir)
+#    if not bin_path.exists():
+#        print(f"Bin dir {bin_dir} is not a dir")
+#        return
+#
+#    matching_files = {}
+#    for bin in bin_path.glob('*'):
+#        for res_file in input_path.rglob('*'):
+#            if ".npz" not in res_file.name:
+#                continue
+#            elif res_file.name.replace("_result.npz","") == bin.name:
+#                matching_files[bin] = res_file
+#
+#    if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
+#        print(f"Num matching files {len(matching_files.keys())}")
+#        print(f"Num bins in path {len(list(bin_path.glob('*')))}")
+#        print(f"Some bins don't have matching result file")
+#        raise Exception
+#
+#
+#    total_start_conf = ConfusionMatrix(0,0,0,0)
+#    total_bound_conf = ConfusionMatrix(0,0,0,0)
+#    tmp_total_bound_conf = ConfusionMatrix(0,0,0,0)
+#    total_bytes = 0
+#
+#    for bin in alive_it(list(matching_files.keys())):
+#        # Init the confusion matrix for this bin
+#        start_conf = ConfusionMatrix(0,0,0,0)
+#        bound_conf = ConfusionMatrix(0,0,0,0)
+#        bound_conf = ConfusionMatrix(0,0,0,0)
+#
+#
+#        # 1  - Ground truth for bin file 
+#        gnd_truth = lief_gnd_truth(bin.resolve())
+#        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+#                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+#
+#
+#        # 2 - Find the npz with the ghidra funcs and addrs, chop of functions that 
+#        #     are out-of-bounds of the lief functions (these are functions that are
+#        #       likely outside of the .text section)
+#        ghid_funcs = read_ghid_npz(matching_files[bin])
+#
+#        # 3 - Apply the offset to the ghidra funcs
+#        offset = find_offset(sorted(gnd_matrix[:,0].tolist()), 
+#                             sorted((ghid_funcs[:,0].tolist())))
+#
+#        offset_funcs = ghid_funcs.copy()
+#        offset_funcs[:,0] += offset
+#
+#        # 4 - Mask the array so we only include bytes in .text
+#        mask = ((ghid_funcs[:,0] <= np.max(gnd_truth.func_addrs)) & 
+#                    ghid_funcs[:,0] >= np.min(gnd_truth.func_addrs))
+#        filt_ghid_funcs= ghid_funcs[mask]
+#
+#        mask = ((offset_funcs[:,0]  < np.max(gnd_truth.func_addrs)) & 
+#                    (offset_funcs[:,0] >  np.min(gnd_truth.func_addrs)))
+#        filt_offset_funcs = offset_funcs[mask]
+#
+#        # 3 - Compare the two lists
+#
+#        # Get all the start addrs that are in both, in ghid only, in gnd_trush only
+#        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], filt_offset_funcs[:,0]))
+#        start_conf.fp=len(np.setdiff1d( filt_offset_funcs[:,0], gnd_matrix[:,0] ))
+#        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], filt_offset_funcs[:,0]))
+#
+#        # tp + fp = Total predicted
+#        if not start_conf.tp + start_conf.fp == filt_offset_funcs.shape[0]:
+#            print(f"{start_conf.tp}")
+#            print(f"{start_conf.fp}")
+#            print(f"{filt_offset_funcs.shape[0]}")
+#            raise Exception
+#
+#        # tp + fn = total pos
+#        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
+#            print(f"{start_conf.fp}")
+#            print(f"{start_conf.fn}")
+#            print(f"{filt_offset_funcs.shape[0]}")
+#            raise Exception
+#
+#        # Small recap: 
+#        # GND_TRUTH = | addr | len 
+#        #             | ...  | ... 
+#        # 
+#
+#        # BUG!!! This DOES NOT work correctly:
+#        # Example to show the incorrectness:
+#        #   predicted = [[1  2]
+#        #                [3  4]
+#        #   target    = [[1  4]
+#        #                [3  2]
+#        #  The below would count that as 2 TP!! This is beacuse the isin
+#        #   function does not consider is the WHOLE ROW is in the vector, but
+#        #   rather only considerrs if a single value is in it 
+#
+#        # TP is every common row between gnd turth and pred
+#        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_offset_funcs, gnd_matrix),axis=1))
+#
+#        ## FP = Total number of functions in pred - tp
+#        #bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
+#        ## FN = Total number of functions in ground - tp
+#        #bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+#
+#        #print(f"GROUND SHAPE: {gnd_matrix.shape}")
+#        #print(f"PRED SHAPE: {filt_offset_funcs.shape}")
+#        #print(f"BOUND TP+FP: {bound_conf.tp+bound_conf.fp}")
+#        #print(f"BOUND TP+FN: {bound_conf.tp+bound_conf.fn}")
+#
+#        # Check the predicted bounds for correctness
+#        for row in filt_offset_funcs:
+#            if np.any(np.all(row == gnd_matrix, axis=1)): 
+#                bound_conf.tp+=1
+#            #else:
+#            #    bound_conf.fp+=1
+#        # FP = Total number of functions in pred - tp
+#        bound_conf.fp = filt_offset_funcs.shape[0] - bound_conf.tp
+#        # FN = Total number of functions in ground - tp
+#        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+#
+#        # Check to see how many false negative there were 
+#        #for row in gnd_matrix:
+#        #    if not np.any(np.all(row == filt_offset_funcs, axis=1)):
+#        #        bound_conf.fn+=1
+#
+#        # More sanity checks for bounds
+#        # tp + fn = total pos
+#        if not bound_conf.tp + bound_conf.fn == gnd_matrix.shape[0]:
+#            print(f"{bound_conf.fp}")
+#            print(f"{bound_conf.fn}")
+#            print(f"{filt_offset_funcs.shape}")
+#            print(f"{gnd_matrix.shape}")
+#            raise Exception
+#
+#        # fp + tp = total predictin
+#        if not bound_conf.tp + bound_conf.fp == filt_offset_funcs.shape[0]:
+#            print(f"{bound_conf.fp}")
+#            print(f"{bound_conf.fn}")
+#            print(f"{filt_offset_funcs.shape}")
+#            print(f"{gnd_matrix.shape}")
+#            raise Exception
+#
+#        total_bytes += gnd_truth.num_bytes
+#
+#        total_start_conf.tp += start_conf.tp
+#        total_start_conf.fp += start_conf.fp
+#        total_start_conf.fn += start_conf.fn
+#
+#        total_bound_conf.tp += bound_conf.tp
+#        total_bound_conf.fp += bound_conf.fp
+#        total_bound_conf.fn += bound_conf.fn
+#
+#        if verbose:
+#            print(f"binary: {bin.name}")
+#            print(f"Starts: {start_conf}")
+#            print(f"Metrics: {calc_metrics(start_conf)}")
+#            print(f"Bounds: {bound_conf}")
+#            print(f"Metrics: {calc_metrics(bound_conf)}")
+#
+#    print(f"Total Metrics")
+#    print(f"Starts: {total_start_conf}")
+#    print(f"Starts: {calc_metrics(total_start_conf)}")
+#    print(f"Bounds: {total_bound_conf}")
+#    print(f"Bounds: {calc_metrics(total_bound_conf)}")
+#
+#    return 
 
+#def read_ghid_npz(inp: Path)->np.ndarray:
+#    '''
+#    Read the ghid npz
+#    '''
+#    npz_file = np.load(inp)
+#    return npz_file[list(npz_file.keys())[0]].astype(int)
 
-    #keys = ['tp', 'fp', 'fn', 'runtime']
-    keys = ['tp', 'fp', 'fn', 'runtime', 'filesize']
+#@app.command()
+#def read_comparison_file(
+#    input : Annotated[str,typer.Argument()],
+#    list_fn: Annotated[bool, typer.Option(help="List the false neg's")] = False,
+#    list_fp: Annotated[bool, typer.Option(help="List the false pos's")] = False,
+#    ):
+#    '''
+#    Read a single comparison file
+#    '''
+#
+#    # Read the file if it exists
+#    if not (file:=Path(input)).exists():
+#        return
+#    else:
+#        with open(file, 'r') as f:
+#            data = json.load(f)
+#
+#    if data == {}:
+#        print(f"No data in file {file}")
+#        return
+#
+#
+#    # Read in the results 
+#    tp = len(data['same'])
+#    fp = len(data['ghid_only'])
+#    fn = len(data['lief_only'])
+#    filesize = data['filesize']
+#    runtime = data['runtime']
+#
+#
+#    if list_fn:
+#        print("FN | int | hex")
+#        for addr in data['lief_only']:
+#            print(f"FN | {addr} | {hex(addr)}")
+#
+#    if list_fp:
+#        print("FP | int | hex")
+#        for addr in data['ghid_only']:
+#            print(f"FP | {addr} | {hex(addr)}")
+#
+#    print(f"BPS: {filesize / runtime}")
+#
+#    if tp > 0:
+#        prec = tp/(tp+fp)
+#        recall = tp/(tp+fn)
+#        f1 = 2 * prec* recall / (prec+recall)
+#
+#        print(f"Prec: {prec}")
+#        print(f"Recall: {recall}")
+#        print(f"F1 : {f1}")
+#    else:
+#        print(f"Analyzed tp is 0")
+#    return
 
-    analyzed = { k: 0 for k in keys}
-    not_analyzed = { k: 0 for k in keys}
+#@app.command()
+#def read_comparison_dir(
+#    dir : Annotated[str,typer.Argument()],
+#    ):
+#
+#
+#    #keys = ['tp', 'fp', 'fn', 'runtime']
+#    keys = ['tp', 'fp', 'fn', 'runtime', 'filesize']
+#
+#    analyzed = { k: 0 for k in keys}
+#    not_analyzed = { k: 0 for k in keys}
+#
+#
+#    for file in alive_it(Path(dir).glob('*')):
+#        # IF STRIPPED in name it was stripped 
+#        # IF analysis in the name it was anaylzed
+#
+#        data = {}
+#        with open(file, 'r') as f:
+#            data = json.load(f)
+#
+#        if data == {}:
+#            continue
+#
+#        if "NOANALYSIS" in file.name:
+#            was_analyzed = False
+#        else:
+#            was_analyzed = True
+#        
+#        if "STRIPPED" in file.name:
+#            stripped = True
+#        else:
+#            stripped = False
+#
+#
+#        if stripped and was_analyzed:
+#            analyzed['tp'] += len(data['same'])
+#            analyzed['fp'] += len(data['ghid_only'])
+#            analyzed['fn'] += len(data['lief_only'])
+#            analyzed['filesize'] += data['filesize']
+#            analyzed['runtime'] += data['runtime']
+#
+#
+#        if stripped and not was_analyzed:
+#            not_analyzed['tp'] += len(data['same'])
+#            not_analyzed['fp'] += len(data['ghid_only'])
+#            not_analyzed['fn'] += len(data['lief_only'])
+#            not_analyzed['runtime'] += data['runtime']
+#            not_analyzed['filesize'] += data['filesize']
+#
+#    print("ANALYZED:")
+#    for key in analyzed.keys():
+#        print(f"{key} : {analyzed[key]}")
+#
+#    print(f"BPS: {analyzed['filesize'] / analyzed['runtime']}")
+#
+#    if analyzed['tp'] > 0:
+#        prec = analyzed['tp']/(analyzed['tp']+analyzed['fp'])
+#        recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
+#        f1 = 2 * prec* recall / (prec+recall)
+#
+#        print(f"Prec: {prec}")
+#        print(f"Recall: {recall}")
+#        print(f"F1 : {f1}")
+#    else:
+#        print(f"Analyzed tp is 0")
+#
+#
+#
+#    print("+=====================+")
+#    print("NOT ANALYZED:")
+#    for key in not_analyzed.keys():
+#        print(f"{key} : {not_analyzed[key]}")
+#
+#    if not_analyzed['tp'] > 0:
+#        prec = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fp'])
+#        recall = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fn'])
+#        f1 = 2 * prec* recall / (prec+recall)
+#        print(f"Prec: {prec}")
+#        print(f"Recall: {recall}")
+#        print(f"F1 : {f1}")
+#
+#    return
 
-
-    for file in alive_it(Path(dir).glob('*')):
-        # IF STRIPPED in name it was stripped 
-        # IF analysis in the name it was anaylzed
-
-        data = {}
-        with open(file, 'r') as f:
-            data = json.load(f)
-
-        if data == {}:
-            continue
-
-        if "NOANALYSIS" in file.name:
-            was_analyzed = False
-        else:
-            was_analyzed = True
-        
-        if "STRIPPED" in file.name:
-            stripped = True
-        else:
-            stripped = False
-
-
-        if stripped and was_analyzed:
-            analyzed['tp'] += len(data['same'])
-            analyzed['fp'] += len(data['ghid_only'])
-            analyzed['fn'] += len(data['lief_only'])
-            analyzed['filesize'] += data['filesize']
-            analyzed['runtime'] += data['runtime']
-
-
-        if stripped and not was_analyzed:
-            not_analyzed['tp'] += len(data['same'])
-            not_analyzed['fp'] += len(data['ghid_only'])
-            not_analyzed['fn'] += len(data['lief_only'])
-            not_analyzed['runtime'] += data['runtime']
-            not_analyzed['filesize'] += data['filesize']
-
-    print("ANALYZED:")
-    for key in analyzed.keys():
-        print(f"{key} : {analyzed[key]}")
-
-    print(f"BPS: {analyzed['filesize'] / analyzed['runtime']}")
-
-    if analyzed['tp'] > 0:
-        prec = analyzed['tp']/(analyzed['tp']+analyzed['fp'])
-        recall = analyzed['tp']/(analyzed['tp']+analyzed['fn'])
-        f1 = 2 * prec* recall / (prec+recall)
-
-        print(f"Prec: {prec}")
-        print(f"Recall: {recall}")
-        print(f"F1 : {f1}")
-    else:
-        print(f"Analyzed tp is 0")
-
-
-
-    print("+=====================+")
-    print("NOT ANALYZED:")
-    for key in not_analyzed.keys():
-        print(f"{key} : {not_analyzed[key]}")
-
-    if not_analyzed['tp'] > 0:
-        prec = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fp'])
-        recall = not_analyzed['tp']/(not_analyzed['tp']+not_analyzed['fn'])
-        f1 = 2 * prec* recall / (prec+recall)
-        print(f"Prec: {prec}")
-        print(f"Recall: {recall}")
-        print(f"F1 : {f1}")
-
-    return
-
-def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:bool, out_file:Path, runtime: int):
-    """
-    Save the comparison to a result json
-    """
-
-    # If the file is to be stripepd strip it now 
-    bin = gen_strip_file(bin)
-
-    # Creat the data dictionary to be saved
-    data = {
-        'binary_name' : bin.name,
-        'stripped' : stripped,
-        'noanalysis' : noanalysis,
-        'same' : same.tolist(),
-        'ghid_only' : ghid_only.tolist(),
-        'lief_only' : lief_only.tolist(),
-        'runtime' : runtime,
-        'filesize' : bin.stat().st_size
-    }
-
-    # Delete the stripped version of the binary
-    bin.unlink()
-
-    # Dump the file to the json file
-    with open(out_file, 'w') as f:
-        json.dump(data,f)
-    return
+#def save_comparison(bin, stripped: bool, same, ghid_only, lief_only, noanalysis:bool, out_file:Path, runtime: int):
+#    """
+#    Save the comparison to a result json
+#    """
+#
+#    # If the file is to be stripepd strip it now 
+#    bin = gen_strip_file(bin)
+#
+#    # Creat the data dictionary to be saved
+#    data = {
+#        'binary_name' : bin.name,
+#        'stripped' : stripped,
+#        'noanalysis' : noanalysis,
+#        'same' : same.tolist(),
+#        'ghid_only' : ghid_only.tolist(),
+#        'lief_only' : lief_only.tolist(),
+#        'runtime' : runtime,
+#        'filesize' : bin.stat().st_size
+#    }
+#
+#    # Delete the stripped version of the binary
+#    bin.unlink()
+#
+#    # Dump the file to the json file
+#    with open(out_file, 'w') as f:
+#        json.dump(data,f)
+#    return
 
 
 #@app.command()
@@ -1294,7 +1365,6 @@ def install_ghidra():
     # Copy the file to the location
     script_file = install_script.parent / "List_Function_and_Entry.py"
     shutil.copy2(script_file, scripts)
-
     return
 
 

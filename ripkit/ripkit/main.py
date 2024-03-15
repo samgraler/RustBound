@@ -2,17 +2,14 @@ import typer
 from collections import Counter
 import numpy as np
 from enum import Enum
-import bench_ghidra.eval_ghidra as ghid_bench
+import ghidra.cli as ghidra_cli
 from typing import List
-import auto_ida.cli as ida_bench 
+import ida.cli as ida_cli 
 import shutil
 from dataclasses import dataclass
-from itertools import chain
 import subprocess
 import lief
-import math
 import json
-import pandas as pd
 from typing_extensions import Annotated
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
@@ -23,8 +20,8 @@ from rich.progress import track
 
 console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
-app.add_typer(ghid_bench.app, name="ghidra")
-app.add_typer(ida_bench.app, name="ida")
+app.add_typer(ghidra_cli.app, name="ghidra")
+app.add_typer(ida_cli.app, name="ida")
 
 
 from ripkit.cargo_picky import (
@@ -51,16 +48,9 @@ from ripkit.ripbin import (
     calculate_md5,
     RustFileBundle,
     generate_minimal_labeled_features,
-    DB_PATH,
     AnalysisType,
-    FileType,
-    Compiler,
-    ProgLang,
     RustcOptimization,
     disasm_at,
-    disasm_with,
-    lief_disassemble_text_section,
-    disasm_bytes,
 )
 
 
