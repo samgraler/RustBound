@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import typer
+import math
 import os
 from typing import List
 from pathlib import Path
 import time
-import re
-from itertools import chain
+from multiprocessing import Pool
 import matplotlib.pyplot as plt
 from typing_extensions import Annotated
 import subprocess
@@ -411,6 +411,44 @@ def get_ghid_bounds(bin_path, ghidra_flags, use_offset:bool, strip_the_bin: bool
 #
 #    return same, lief_only, ghid_only, runtime
 
+def score_worker(bins_and_preds:List[tuple[Path,Path]]):
+    '''
+    Worker processes to score a file
+    '''
+    # Save the results here
+    total_start_conf = ConfusionMatrix(0,0,0,0)
+    total_bound_conf = ConfusionMatrix(0,0,0,0)
+    total_end_conf = ConfusionMatrix(0,0,0,0)
+
+    for (bin,pred) in bins_and_preds:
+        # 1. Load gnd truth
+        gnd_info, gnd = gnd_truth_start_plus_len(bin)
+
+        # 2. Load prediction
+        pred = load_ghidra_prediction(pred, gnd)
+
+        # 3. Score the prediction
+        start_conf, end_conf, bound_conf = score_start_plus_len(gnd, pred, 
+                                                    gnd_info.text_first_addr, 
+                                                   gnd_info.text_last_addr)
+        # Update the total start conf
+        total_start_conf.tp+= start_conf.tp
+        total_start_conf.fp+= start_conf.fp
+        total_start_conf.fn+= start_conf.fn
+
+        # Update the total start conf
+        total_end_conf.tp+= end_conf.tp
+        total_end_conf.fp+= end_conf.fp
+        total_end_conf.fn+= end_conf.fn
+
+        # Update the total start conf
+        total_bound_conf.tp+= bound_conf.tp
+        total_bound_conf.fp+= bound_conf.fp
+        total_bound_conf.fn+= bound_conf.fn
+
+    return total_start_conf, total_end_conf, total_bound_conf
+
+
 @app.command()
 def read_results(
     result_dir: Annotated[str,typer.Argument(
@@ -419,6 +457,7 @@ def read_results(
     bin_dir: Annotated[str, typer.Argument(
         callback = iterable_path_shallow_callback
                 )],
+    workers: Annotated[int, typer.Option()] = 24,
     verbose: Annotated[bool, typer.Option()] = False,
     ):
     '''
@@ -441,18 +480,25 @@ def read_results(
     total_bound_conf = ConfusionMatrix(0,0,0,0)
     total_end_conf = ConfusionMatrix(0,0,0,0)
 
-    for bin in alive_it(list(matching_files.keys())):
+    workers = 24
+    chunk_size = int(len(matching_files.keys()) / workers)
+    chunks = []
+    cur_index = 0
+    keys = list(matching_files.keys())
 
-        # 1. Load gnd truth
-        gnd_info, gnd = gnd_truth_start_plus_len(bin)
+    # Divy up the work. 
+    for i in range(workers):
+        # The last worker need to take extra bins if there was a remainder
+        if i == workers-1:
+            chunks.append([(bin, matching_files[bin]) for bin in keys[cur_index::]])
+        else:
+            chunks.append([(bin, matching_files[bin]) for bin in keys[cur_index:cur_index+chunk_size]])
+        cur_index+=chunk_size
 
-        # 2. Load prediction
-        pred = load_ghidra_prediction(matching_files[bin], gnd)
+    with Pool(processes=workers) as pool:
+        results = pool.map(score_worker, chunks)
 
-        # 3. Score the prediction
-        start_conf, end_conf, bound_conf = score_start_plus_len(gnd, pred, gnd_info.text_first_addr, 
-                                                                gnd_info.text_last_addr)
-
+    for (start_conf, end_conf, bound_conf) in results:
         # Update the total start conf
         total_start_conf.tp+= start_conf.tp
         total_start_conf.fp+= start_conf.fp
@@ -469,9 +515,40 @@ def read_results(
         total_bound_conf.fp+= bound_conf.fp
         total_bound_conf.fn+= bound_conf.fn
 
+
+    #for bin in alive_it(list(matching_files.keys())):
+
+    #    # 1. Load gnd truth
+    #    gnd_info, gnd = gnd_truth_start_plus_len(bin)
+
+    #    # 2. Load prediction
+    #    pred = load_ghidra_prediction(matching_files[bin], gnd)
+
+    #    # 3. Score the prediction
+    #    start_conf, end_conf, bound_conf = score_start_plus_len(gnd, pred, gnd_info.text_first_addr, 
+    #                                                            gnd_info.text_last_addr)
+
+    #    # Update the total start conf
+    #    total_start_conf.tp+= start_conf.tp
+    #    total_start_conf.fp+= start_conf.fp
+    #    total_start_conf.fn+= start_conf.fn
+
+    #    # Update the total start conf
+    #    total_end_conf.tp+= end_conf.tp
+    #    total_end_conf.fp+= end_conf.fp
+    #    total_end_conf.fn+= end_conf.fn
+
+
+    #    # Update the total start conf
+    #    total_bound_conf.tp+= bound_conf.tp
+    #    total_bound_conf.fp+= bound_conf.fp
+    #    total_bound_conf.fn+= bound_conf.fn
+
     print(f"Total Metrics")
     print(f"Starts: {total_start_conf}")
     print(f"Starts: {calc_metrics(total_start_conf)}")
+    print(f"Ends: {total_end_conf}")
+    print(f"Ends: {calc_metrics(total_end_conf)}")
     print(f"Bounds: {total_bound_conf}")
     print(f"Bounds: {calc_metrics(total_bound_conf)}")
     return
