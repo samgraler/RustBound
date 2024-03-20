@@ -464,6 +464,7 @@ def read_results(
     Read the results from the input dir
     '''
 
+    # Need to make sure every bin has a matching prediction file
     matching_files = {}
     for bin in bin_dir:
         for res_file in result_dir:
@@ -471,7 +472,7 @@ def read_results(
                 continue
             elif res_file.name.replace("_result.npz","") == bin.name:
                 matching_files[bin] = res_file
-
+    
     if len(matching_files.keys()) != len(bin_dir):
         print("Some bins don't have matching result file")
         raise Exception
@@ -480,7 +481,6 @@ def read_results(
     total_bound_conf = ConfusionMatrix(0,0,0,0)
     total_end_conf = ConfusionMatrix(0,0,0,0)
 
-    workers = 24
     chunk_size = int(len(matching_files.keys()) / workers)
     chunks = []
     cur_index = 0
@@ -490,11 +490,18 @@ def read_results(
     for i in range(workers):
         # The last worker need to take extra bins if there was a remainder
         if i == workers-1:
-            chunks.append([(bin, matching_files[bin]) for bin in keys[cur_index::]])
+            bins =  keys[cur_index::]
+            #chunks.append([(bin, matching_files[bin]) for bin in ])
         else:
-            chunks.append([(bin, matching_files[bin]) for bin in keys[cur_index:cur_index+chunk_size]])
+            bins =  keys[cur_index:cur_index+chunk_size]
+            #@chunks.append([(bin, matching_files[bin]) for bin in bins])
+                            #keys[cur_index:cur_index+chunk_size]])
+
+        # Add a list of tuple: [(bin, prediction), (bin,prediction), ...]
+        chunks.append([(bin, matching_files[bin]) for bin in bins])
         cur_index+=chunk_size
 
+    # Runs the process pool to read the results
     with Pool(processes=workers) as pool:
         results = pool.map(score_worker, chunks)
 
@@ -508,7 +515,6 @@ def read_results(
         total_end_conf.tp+= end_conf.tp
         total_end_conf.fp+= end_conf.fp
         total_end_conf.fn+= end_conf.fn
-
 
         # Update the total start conf
         total_bound_conf.tp+= bound_conf.tp

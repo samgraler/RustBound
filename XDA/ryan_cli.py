@@ -1196,26 +1196,24 @@ def read_bounds_raw(
             try:
                 if filt_sorted_bounds.shape[0] == 0:
                     xda_bounds = np.array([[]])
+                    print("Empty bounds")
                 else:
                     if filt_sorted_bounds[0,1] == 2:
                         filt_sorted_bounds = filt_sorted_bounds[1:,:]
-
-                    if filt_sorted_bounds.shape[0] == 0:
-                        xda_bounds = np.array([[]])
-                    elif filt_sorted_bounds[-1,1] == 1:
+                    if filt_sorted_bounds[-1,1] == 1:
                         filt_sorted_bounds = filt_sorted_bounds[:-1,:]
                     # Lastly, combine the start and ends array to make matrix:   | start | end |
                         starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
                         ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
                         xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
+
             except Exception as e:
                 print(filt_sorted_bounds.shape)
                 raise(e)
-                
 
-        if total_start_conf.tp == 0:
-            np.save("TMP_XDA_BOUINDS", xda_bounds)
-            np.save("TMP_GND_M", gnd_matrix)
+        #if total_start_conf.tp == 0:
+        #    np.save("TMP_XDA_BOUINDS", xda_bounds)
+        #    np.save("TMP_GND_M", gnd_matrix)
 
         # 6 - Compare the ends
         #bound_conf.tp=len(np.intersect1d(gnd_matrix, xda_bounds))
@@ -1277,8 +1275,11 @@ def read_bounds_raw(
             print(f"Bounds: {bound_conf}")
             print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
 
+    print(f"Starts Conf: {total_start_conf}")
     print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
+    print(f"Ends Conf: {total_end_conf}")
     print(f"Ends Metrics: {calc_metrics(total_end_conf)}")
+    print(f"Bounds Conf: {total_start_conf}")
     print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
     return 
 
