@@ -228,23 +228,6 @@ def find_offset(lief_addrs, ghidra_addrs):
 
     ghid_addr_bnext =  append_bnext(ghidra_addrs)
     lief_addrs =  append_bnext(lief_addrs)
-
-
-
-    # BUG: This is temp make sure to take it away 
-    # BUG Write this to save the bnext to files 
-    with open("GHID_FUNC", 'w') as f:
-        for i, (func, bnext) in enumerate(ghid_addr_bnext):
-            f.write(f"{func} : {bnext}\n")
-
-    with open("LIEF_FUNC", 'w') as f:
-        for i, (func,bnext) in enumerate(lief_addrs):
-            f.write(f"{func} : {bnext}\n")
-
-
-
-
-
     offset = 0
     found_offset = False
     for i, (addr, btnext) in enumerate(lief_addrs):

@@ -162,8 +162,9 @@ def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray,
     #mask = ((prediction[:,0]  < max_addr) & (prediction[:,0] >  min_addr))
     #
     # Create the mask
-    mask = ((prediction[:,0]  < np.max(gnd[:,0])) & 
-            (prediction[:,0] >  np.min(gnd[:,0])))
+    mask = ((prediction[:,0]  <= np.max(gnd[:,0])) & 
+            (prediction[:,0] >=  np.min(gnd[:,0])))
+    #print(f"Mask uses min {np.min(gnd[:,0])} and max {np.max(gnd[:,0])}")
 
     # Apply the mask
     filt_prediction = prediction[mask]
@@ -172,7 +173,7 @@ def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray,
 
     # 3.1 - Function start stats
     start_conf.tp=len(np.intersect1d(gnd[:,0], filt_prediction[:,0]))
-    start_conf.fp = prediction.shape[0] - start_conf.tp
+    start_conf.fp = filt_prediction.shape[0] - start_conf.tp
     start_conf.fn = gnd.shape[0] - start_conf.tp
 
     # 3.2 - Function end stats

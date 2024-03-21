@@ -1,7 +1,7 @@
 import typer 
-from math import floor
 from scipy import stats
 import shutil
+from multiprocessing import Pool
 import os
 import subprocess
 from typing_extensions import Annotated
@@ -15,6 +15,11 @@ import time
 ripkit_dir = Path("../ripkit").resolve()
 import sys
 import matplotlib.pyplot as plt 
+from ripkit.score import (
+    score_start_plus_len,
+    load_ida_prediction,
+    gnd_truth_start_plus_len,
+)
 sys.path.append (
     str(ripkit_dir)
 )
@@ -726,131 +731,255 @@ def make_simple_pdf(y, label_x: str, label_y: str, title:str, save_path: Path):
     return 
 
 
+def score_worker(bins_and_preds:List[tuple[Path,Path]]):
+    '''
+    Worker processes to score a file
+    '''
+    # Save the results here
+    total_start_conf = ConfusionMatrix(0,0,0,0)
+    total_bound_conf = ConfusionMatrix(0,0,0,0)
+    total_end_conf = ConfusionMatrix(0,0,0,0)
 
+    for (bin,pred_npy) in bins_and_preds:
+        # 1. Load gnd truth
+        gnd_info, gnd = gnd_truth_start_plus_len(bin)
+
+        # 2. Load prediction
+        pred = load_ida_prediction(pred_npy)
+
+        # 3. Score the prediction
+        start_conf, end_conf, bound_conf = score_start_plus_len(gnd, pred, 
+                                                    gnd_info.text_first_addr, 
+                                                   gnd_info.text_last_addr)
+        # Update the total start conf
+        total_start_conf.tp+= start_conf.tp
+        total_start_conf.fp+= start_conf.fp
+        total_start_conf.fn+= start_conf.fn
+
+        # Update the total start conf
+        total_end_conf.tp+= end_conf.tp
+        total_end_conf.fp+= end_conf.fp
+        total_end_conf.fn+= end_conf.fn
+
+        # Update the total start conf
+        total_bound_conf.tp+= bound_conf.tp
+        total_bound_conf.fp+= bound_conf.fp
+        total_bound_conf.fn+= bound_conf.fn
+
+    return total_start_conf, total_end_conf, total_bound_conf
+
+
+#TODO: This has different results than old_read_results 
 @app.command()
 def read_results(
-    input_dir : Annotated[str,typer.Argument()],
-    bin_dir: Annotated[str, typer.Argument()],
+    result_dir: Annotated[str,typer.Argument(
+        callback = iterable_path_deep_callback
+                )],
+    bin_dir: Annotated[str, typer.Argument(
+        callback = iterable_path_shallow_callback
+                )],
+    workers: Annotated[int, typer.Option()] = 24,
     verbose: Annotated[bool, typer.Option()] = False,
     ):
     '''
-    Read the input dir and compute results using the lief module
+    Read the results from the input dir
     '''
 
-    input_path = Path(input_dir)
-    if not input_path.exists(): 
-        print(f"Inp dir {input_dir} is not a dir")
-        return
-
-    bin_path = Path(bin_dir)
-    if not bin_path.exists():
-        print(f"Bin dir {bin_dir} is not a dir")
-        return
-
+    # Need to make sure every bin has a matching prediction file
     matching_files = {}
-    for bin in bin_path.glob('*'):
-        matching = False
-        for res_file in input_path.rglob('*'):
+    for bin in bin_dir:
+        for res_file in result_dir:
             if ".npz" not in res_file.name:
                 continue
-            if res_file.name.replace("_result.npz","") == bin.name:
+            elif res_file.name.replace("_result.npz","") == bin.name:
                 matching_files[bin] = res_file
-                matching = True
-        if not matching:
-            print(f"Never found {bin.name}")
-
-
-    if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
-        msg = f"Found {len(matching_files.keys())}: {matching_files.keys()}"
-        print(f"{matching_files.keys()}")
-        print(f"Some bins don't have matching result file")
-        raise Exception(msg)
-
+    
+    if len(matching_files.keys()) != len(bin_dir):
+        print("Some bins don't have matching result file")
+        raise Exception
 
     total_start_conf = ConfusionMatrix(0,0,0,0)
     total_bound_conf = ConfusionMatrix(0,0,0,0)
-    total_bytes = 0
+    total_end_conf = ConfusionMatrix(0,0,0,0)
 
-    for bin in alive_it(list(matching_files.keys())):
-        # Init the confusion matrix for this bin
-        start_conf = ConfusionMatrix(0,0,0,0)
-        bound_conf = ConfusionMatrix(0,0,0,0)
+    chunk_size = int(len(matching_files.keys()) / workers)
+    chunks = []
+    index = 0
+    keys = list(matching_files.keys())
 
-        # 1  - Ground truth for bin file, func addr, len
-        gnd_truth = lief_gnd_truth(bin.resolve())
-        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+    # Divy up the work. 
+    for i in range(workers):
+        # The last worker need to take extra bins if there was a remainder
+        bins = keys[index::] if i == workers-1 else  keys[index:index+chunk_size]
+        #if i == workers-1:
+        #    bins =  keys[cur_index::]
+        #else:
+        #    bins =  keys[cur_index:cur_index+chunk_size]
 
-        # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
-        #     are out-of-bounds of the lief functions (these are functions that are
-        #       likely outside of the .text section)
-        ida_funcs = read_ida_npz(matching_files[bin])
+        # Add a list of tuple: [(bin, prediction), (bin,prediction), ...]
+        chunks.append([(bin, matching_files[bin]) for bin in bins])
+        index+=chunk_size
 
-        # 4 - Mask the array so we only include bytes in .text
-        mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
-        ida_funcs = ida_funcs[mask_max]
+    # Runs the process pool to read the results
+    with Pool(processes=workers) as pool:
+        results = pool.map(score_worker, chunks)
 
-        mask_min = (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs))
-        filt_ida_funcs = ida_funcs[mask_min]
+    for (start_conf, end_conf, bound_conf) in results:
+        # Update the total start conf
+        total_start_conf.tp+= start_conf.tp
+        total_start_conf.fp+= start_conf.fp
+        total_start_conf.fn+= start_conf.fn
 
+        # Update the total start conf
+        total_end_conf.tp+= end_conf.tp
+        total_end_conf.fp+= end_conf.fp
+        total_end_conf.fn+= end_conf.fn
 
-        # 3 - Compare the two lists
-        # Get all the start addrs that are in both, in ida only, in gnd_trush only
-        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], filt_ida_funcs[:,0]))
-        start_conf.fp=len(np.setdiff1d( filt_ida_funcs[:,0], gnd_matrix[:,0] ))
-        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], filt_ida_funcs[:,0]))
+        # Update the total start conf
+        total_bound_conf.tp+= bound_conf.tp
+        total_bound_conf.fp+= bound_conf.fp
+        total_bound_conf.fn+= bound_conf.fn
 
-
-        # tp + fp = Total predicted
-        if not start_conf.tp + start_conf.fp == filt_ida_funcs.shape[0]:
-            print(f"{start_conf.tp}")
-            print(f"{start_conf.fp}")
-            print(f"{filt_ida_funcs.shape[0]}")
-            raise Exception
-
-        # tp + fn = total pos
-        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
-            print(f"{start_conf.fp}")
-            print(f"{start_conf.fn}")
-            print(f"{filt_ida_funcs.shape[0]}")
-            raise Exception
-
-
-        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_ida_funcs, gnd_matrix),axis=1))
-
-
-
-        ## The above is a test of an old code implementation ^^
+    print("Total Metrics")
+    print(f"Starts: {total_start_conf}")
+    print(f"Starts: {calc_metrics(total_start_conf)}")
+    print(f"Ends: {total_end_conf}")
+    print(f"Ends: {calc_metrics(total_end_conf)}")
+    print(f"Bounds: {total_bound_conf}")
+    print(f"Bounds: {calc_metrics(total_bound_conf)}")
+    return
 
 
-        for row in filt_ida_funcs:
-            if np.any(np.all(row == gnd_matrix, axis=1)): 
-                bound_conf.tp+=1
 
-        bound_conf.fp = filt_ida_funcs.shape[0] - bound_conf.tp
-        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
-        total_bytes += gnd_truth.num_bytes
-
-        total_start_conf.tp += start_conf.tp
-        total_start_conf.fp += start_conf.fp
-        total_start_conf.fn += start_conf.fn
-
-        total_bound_conf.tp += bound_conf.tp
-        total_bound_conf.fp += bound_conf.fp
-        total_bound_conf.fn += bound_conf.fn
-
-        if verbose:
-            print(f"binary: {bin.name}")
-            print(f"Starts: {start_conf}")
-            print(f"Starts Metrics: {calc_metrics(start_conf)}")
-            print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
-
-    print(f"Start conf: {total_start_conf}")
-    print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
-    print(f"Bound conf: {total_bound_conf}")
-    print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
-    return 
+#@app.command()
+#def old_read_results(
+#    input_dir : Annotated[str,typer.Argument()],
+#    bin_dir: Annotated[str, typer.Argument()],
+#    verbose: Annotated[bool, typer.Option()] = False,
+#    ):
+#    '''
+#    Read the input dir and compute results using the lief module
+#    '''
+#
+#    input_path = Path(input_dir)
+#    if not input_path.exists(): 
+#        print(f"Inp dir {input_dir} is not a dir")
+#        return
+#
+#    bin_path = Path(bin_dir)
+#    if not bin_path.exists():
+#        print(f"Bin dir {bin_dir} is not a dir")
+#        return
+#
+#    matching_files = {}
+#    for bin in bin_path.glob('*'):
+#        matching = False
+#        for res_file in input_path.rglob('*'):
+#            if ".npz" not in res_file.name:
+#                continue
+#            if res_file.name.replace("_result.npz","") == bin.name:
+#                matching_files[bin] = res_file
+#                matching = True
+#        if not matching:
+#            print(f"Never found {bin.name}")
+#
+#
+#    if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
+#        msg = f"Found {len(matching_files.keys())}: {matching_files.keys()}"
+#        print(f"{matching_files.keys()}")
+#        print(f"Some bins don't have matching result file")
+#        raise Exception(msg)
+#
+#
+#    total_start_conf = ConfusionMatrix(0,0,0,0)
+#    total_bound_conf = ConfusionMatrix(0,0,0,0)
+#    total_bytes = 0
+#
+#    for bin in alive_it(list(matching_files.keys())):
+#        # Init the confusion matrix for this bin
+#        start_conf = ConfusionMatrix(0,0,0,0)
+#        bound_conf = ConfusionMatrix(0,0,0,0)
+#
+#        # 1  - Ground truth for bin file, func addr, len
+#        gnd_truth = lief_gnd_truth(bin.resolve())
+#        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+#                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+#
+#        # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
+#        #     are out-of-bounds of the lief functions (these are functions that are
+#        #       likely outside of the .text section)
+#        ida_funcs = read_ida_npz(matching_files[bin])
+#
+#        # 4 - Mask the array so we only include bytes in .text
+#        #mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
+#        mask = ((ida_funcs[:,0] <= np.max(gnd_truth.func_addrs)) & 
+#                (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs)))
+#        #ida_funcs = ida_funcs[mask_max]
+#
+#        #print(f"Bin: {bin} Mask uses min {np.min(gnd_truth.func_addrs)} and max {np.max(gnd_truth.func_addrs)}")
+#
+#        #mask_min = (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs))
+#        #filt_ida_funcs = ida_funcs[mask_min]
+#        filt_ida_funcs = ida_funcs[mask]
+#
+#        # 3 - Compare the two lists
+#        # Get all the start addrs that are in both, in ida only, in gnd_trush only
+#        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], filt_ida_funcs[:,0]))
+#        start_conf.fp=len(np.setdiff1d( filt_ida_funcs[:,0], gnd_matrix[:,0] ))
+#        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], filt_ida_funcs[:,0]))
+#
+#
+#        # tp + fp = Total predicted
+#        if not start_conf.tp + start_conf.fp == filt_ida_funcs.shape[0]:
+#            print(f"{start_conf.tp}")
+#            print(f"{start_conf.fp}")
+#            print(f"{filt_ida_funcs.shape[0]}")
+#            raise Exception
+#
+#        # tp + fn = total pos
+#        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
+#            print(f"{start_conf.fp}")
+#            print(f"{start_conf.fn}")
+#            print(f"{filt_ida_funcs.shape[0]}")
+#            raise Exception
+#
+#
+#        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_ida_funcs, gnd_matrix),axis=1))
+#
+#
+#
+#        ## The above is a test of an old code implementation ^^
+#
+#
+#        for row in filt_ida_funcs:
+#            if np.any(np.all(row == gnd_matrix, axis=1)): 
+#                bound_conf.tp+=1
+#
+#        bound_conf.fp = filt_ida_funcs.shape[0] - bound_conf.tp
+#        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+#
+#        total_bytes += gnd_truth.num_bytes
+#
+#        total_start_conf.tp += start_conf.tp
+#        total_start_conf.fp += start_conf.fp
+#        total_start_conf.fn += start_conf.fn
+#
+#        total_bound_conf.tp += bound_conf.tp
+#        total_bound_conf.fp += bound_conf.fp
+#        total_bound_conf.fn += bound_conf.fn
+#
+#        if verbose:
+#            print(f"binary: {bin.name}")
+#            print(f"Starts: {start_conf}")
+#            print(f"Starts Metrics: {calc_metrics(start_conf)}")
+#            print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
+#
+#    print(f"Start conf: {total_start_conf}")
+#    print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
+#    print(f"Bound conf: {total_bound_conf}")
+#    print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
+#    return 
 
 def read_ida_npz(inp: Path)->np.ndarray:
     '''
