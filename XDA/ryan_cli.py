@@ -226,13 +226,7 @@ def xda_predict_raw(bin: Path, model): #-> Generator[tuple[np.ndarray,float], No
         total_time += time.time() - start
 
         total_res[loop_counter] = logprobs.detach().cpu().numpy()
-        #cur_res = logprobs.detach().cpu().numpy()
-        #yield cur_res, total_time
     return total_res,total_time
-
-        # The following line will decide what classification the byte is
-        #predictions = logprobs.argmax(dim=2).view(-1).data
-    #return total_res, total_time
 
 def xda_predict(inp_file: Path, model, out_file:Path = None):
 
@@ -1184,6 +1178,7 @@ def read_bounds_raw(
         if bounds.shape[0] == 0:
             xda_bounds = np.array([[]])
         else:
+            # Again, keep only indicies that are sequentially the first label of there kind...
             indices_to_keep = np.append(True, bounds[1:, 1] != bounds[:-1, 1])
             filt_sorted_bounds = bounds[indices_to_keep]
 
@@ -1193,23 +1188,27 @@ def read_bounds_raw(
             # Check to see if theres no rows,
             # This would be the case is the first 
             # prediction is an end and there is only 1 prediction
-            try:
-                if filt_sorted_bounds.shape[0] == 0:
-                    xda_bounds = np.array([[]])
-                    print("Empty bounds")
-                else:
-                    if filt_sorted_bounds[0,1] == 2:
-                        filt_sorted_bounds = filt_sorted_bounds[1:,:]
-                    if filt_sorted_bounds[-1,1] == 1:
-                        filt_sorted_bounds = filt_sorted_bounds[:-1,:]
-                    # Lastly, combine the start and ends array to make matrix:   | start | end |
-                        starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
-                        ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
-                        xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
+            if filt_sorted_bounds.shape[0] == 0:
+                xda_bounds = np.array([[]])
+            else:
+                # Check to see if the first index is an end prediction, if so remove it 
+                if filt_sorted_bounds[0,1] == 2:
+                    filt_sorted_bounds = filt_sorted_bounds[1:,:]
 
-            except Exception as e:
-                print(filt_sorted_bounds.shape)
-                raise(e)
+                # Check to see if the last prediction is a start, if so remove it
+                if filt_sorted_bounds[-1,1] == 1:
+                    filt_sorted_bounds = filt_sorted_bounds[:-1,:]
+
+                # Lastly, combine the start and ends array to make matrix:   | start | end |
+                starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
+                ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
+                xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
+
+        #dot = np.dot(gnd_matrix[, xda_bounds)
+        #norm_gnd = np.dot(gnd_matrix,gnd_matrix)
+        #norm_xda = np.dot(xda_bounds,xda_bounds)
+        #jac_sim = dot / (norm_gnd + norm_xda - dot)
+        #print(jac_sim)
 
         #if total_start_conf.tp == 0:
         #    np.save("TMP_XDA_BOUINDS", xda_bounds)
@@ -1219,19 +1218,17 @@ def read_bounds_raw(
         #bound_conf.tp=len(np.intersect1d(gnd_matrix, xda_bounds))
         #bound_conf.fp=len(np.setdiff1d( xda_bounds, gnd_matrix ))
         #bound_conf.fn=len(np.setdiff1d(gnd_matrix, xda_bounds))
-        bound_conf.tp = np.count_nonzero(np.all(np.isin(xda_bounds, gnd_matrix),axis=1))
+
+        # 3.3 - Function bounds stats
+        # Check the predicted bounds for correctness
+        # FP = Total number of functions in pred - tp
+        # FN = Total number of functions in ground - tp
+        for row in xda_bounds:
+            if np.any(np.all(row == gnd_matrix, axis=1)): 
+                bound_conf.tp+=1
         bound_conf.fp = xda_bounds.shape[0] - bound_conf.tp
         bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
-
-        debug = True
-        if debug:
-            with open("XDA_FUNCS_BOUND",'w') as f:
-                for row in xda_bounds:
-                    f.write(f"{row}\n")
-            with open("GND_MATRIX",'w') as f:
-                for row in gnd_matrix:
-                    f.write(f"{row}\n")
 
         # tp + fp = Total predicted
         if not start_conf.tp + start_conf.fp == xda_starts.shape[0]:
@@ -1252,6 +1249,7 @@ def read_bounds_raw(
 
         total_bytes += gnd_truth.num_bytes
 
+        # Update the total confusion matrices 
         total_start_conf.tp += start_conf.tp
         total_start_conf.fp += start_conf.fp
         total_start_conf.fn += start_conf.fn
@@ -1268,12 +1266,11 @@ def read_bounds_raw(
             print(f"binary: {bin.name}")
             print(f"Starts: {start_conf}")
             print(f"Starts Metrics: {calc_metrics(start_conf)}")
-
             print(f"Ends : {end_conf}")
             print(f"Ends Metrics: {calc_metrics(end_conf)}")
-
             print(f"Bounds: {bound_conf}")
             print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
+
 
     print(f"Starts Conf: {total_start_conf}")
     print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
@@ -1323,6 +1320,84 @@ def read_xda_npz(inp: Path)->np.ndarray:
 #    results = xda_predict_many(test_files, roberta, out_path.resolve(), save_results=True)
 #
 #    return
+
+
+def chunkwise_hamming_distance(pred_file, gnd, chunk_size=1024):
+    """
+    Compute the Hamming distance between two large datasets stored in numpy files,
+    processing the data in chunks to avoid memory issues.
+    
+    Parameters:
+    - file1, file2: Paths to the numpy files.
+    - chunk_size: The size of chunks to use for reading the data.
+    
+    Returns:
+    - The normalized Hamming distance as a float.
+    """
+    total_distance = 0
+    total_elements = 0  # Keep track of the total number of elements processed.
+    
+    # Open both files in 'read' mode.
+    pred = np.load(pred_file, mmap_mode='r')
+    index = 0 
+    chunk_size = 4096
+
+    # Loop and both are exhausted. Which ever is exachuated first padd with 0s
+    done = False
+    while not done:
+        gnd_exhuasted = False
+        pred_exhuasted = False
+
+        # Load a chunk of data from each file
+        if index+chunk_size < pred.shape[0]:
+            pred_chunk = pred[index:index+chunk_size]
+            pred_exhuasted = True
+        else:
+            # Get the rest and pad with zeros
+            pred_chunk = pred[index::]
+            zeros = np.zeros(chunk_size-len(pred_chunk), dtype=pred_chunk.dtype)
+            pred_chunk = np.concatenate((pred_chunk,zeros))
+
+        # Load a chunk from the prediction
+
+        if index+chunk_size < gnd.shape[0]:
+            gnd_chunk = gnd[index:index+chunk_size]
+            gnd_exhuasted = True
+        else:
+            # Get the rest and pad with zeros
+            gnd_chunk = gnd[index::]
+            zeros = np.zeros(chunk_size-len(gnd_chunk), dtype=gnd_chunk.dtype)
+            gnd_chunk = np.concatenate((gnd_chunk,zeros))
+
+        
+        # Compute the Hamming distance for this chunk.
+        distance = np.sum(pred_chunk != gnd_chunk)
+        total_distance += distance
+        total_elements += chunk_size  # Update the total number of elements.
+
+        if gnd_exhuasted and pred_exhuasted:
+            done = True
+    
+    # Normalize the total distance by the total number of elements.
+    return total_distance / total_elements if total_elements else 0
+
+
+
+def jaccard_similarity(inp1:np.ndarray, inp2:np.ndarray):
+    '''
+    Jaccard sim is equivelantly:
+
+    jac(pred,gnd):
+        TP / (FP + TP + FN)
+    '''
+
+    intersection_size = len(set1.intersection(set2))
+    union_size = len(set1.union(set2))
+
+    if union_size == 0:
+        return 0
+    else:
+        return 1 - (intersection_size/union_size)
 
 if __name__ == '__main__':
     app()
