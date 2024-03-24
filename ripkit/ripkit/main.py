@@ -53,6 +53,7 @@ from ripkit.ripbin import (
     disasm_at,
 )
 
+from ripkit.score import analyze_distances
 
 class CallBackException(Exception):
     def __init__(self, message="Exception building crate"):
@@ -1395,36 +1396,6 @@ def dataset_stats(
     return
 
 
-def get_func_addrs(file: Path):
-        #file_disasm = lief_disassemble_text_section(file)
-
-        # Get the functions 
-        functions = get_functions(file)
-
-        # Add to the prologues dict the prologues
-
-        #bin = lief.parse(str(file.resolve()))
-
-        #text_section = bin.get_section(".text")
-        #text_bytes = text_section.content
-
-        # Get the bytes in the .text section
-        #text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        #base_address = bin.imagebase
-
-        return {x.addr : (x.name, x.size) for x in functions}
-
-
-
-@dataclass
-class Byte_Sequence:
-    addr: str
-    value: str
-    file: str
-
-
 @app.command()
 def search_for_bytes(
     dataset: Annotated[str,typer.Argument(help="The dataset")],
@@ -1550,6 +1521,8 @@ def get_progs(files: List[Path], prolog_size: int ):
 
 
     return
+
+
 
 @app.command()
 def top_prologues(

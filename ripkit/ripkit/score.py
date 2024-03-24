@@ -197,3 +197,66 @@ def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray,
     bound_conf.fn = gnd.shape[0] - bound_conf.tp
 
     return start_conf, end_conf, bound_conf
+
+
+def analyze_distances(gnd:np.ndarray, pred:np.ndarray):
+    '''
+    Analyze the distances between prediction label location and the truth
+
+    NOTICE: distance is: predicted_byte_addr - nearest_gnd_addr
+
+    Input matrices MUST be 2columns by x rows. Col0 = start addr, Col1 = end addr
+    '''
+
+    # Save the distance of end distances here 
+    end_distances = np.empty_like(pred[:,1], dtype=pred.dtype)
+    # Iterate over prediction, and find the nearest address in the gnd prediction
+    for i, addr in enumerate(pred[:,1].tolist()):
+        min_index = np.argmin(gnd[:,1]-addr)
+        end_distances[i]  = gnd[min_index,1]  - addr
+
+    ends_tp = np.count_nonzero(end_distances==0)
+    print(f"Ends TP: {ends_tp}")
+
+
+
+    # Save the distance of start distances here 
+    start_distances = np.empty_like(pred[:,0], dtype=pred.dtype)
+    # Iterate over prediction, and find the nearest address in the gnd prediction
+    for i, addr in enumerate(pred[:,0].tolist()):
+        min_index = np.argmin(gnd[:,0]-addr)
+        start_distances[i]  = gnd[min_index,0] - addr
+
+    starts_tp = np.count_nonzero(start_distances==0)
+    print(f"Starts TP: {starts_tp}")
+
+    #TODO: Bounds is buggy, getting way more misses than I should be 
+    # Save the combined distance here 
+    bound_distances = np.empty_like(pred, dtype=pred.dtype)
+    bound_tp=0
+
+    # The nearest gnd turth is now where (delta(start) + delta(end)) is minimized
+    for i, (start,end) in enumerate(pred):
+        # Distance is: gnd_start - pred_start + gnd_end - pred_end
+
+        # Subtract the current start from every gnd start values 
+        start_delts = gnd[:,0] - start
+
+        # Same for ends 
+        end_delts = gnd[:,1] - end
+
+        # Element wise addition
+        total_delts = start_delts + end_delts
+
+        min_index = np.argmin(total_delts )
+
+        bound_distances[i,0] = gnd[min_index,0] - start
+        bound_distances[i,1] = gnd[min_index,1] - end
+        if bound_distances[i,0] == 0 and  bound_distances[i,1]==0:
+            bound_tp+=1
+
+    print(f"Bounds TP: {bound_tp}")
+
+    return start_distances, end_distances, bound_distances
+
+

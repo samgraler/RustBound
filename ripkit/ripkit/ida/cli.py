@@ -19,6 +19,7 @@ from ripkit.score import (
     score_start_plus_len,
     load_ida_prediction,
     gnd_truth_start_plus_len,
+    analyze_distances,
 )
 sys.path.append (
     str(ripkit_dir)
@@ -415,7 +416,7 @@ def inspect_many_results(
         # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
         #     are out-of-bounds of the lief functions (these are functions that are
         #       likely outside of the .text section)
-        ida_funcs = read_ida_npz(result_path)
+        ida_funcs = load_ida_prediction(result_path)
 
         # 4 - Mask the array so we only include bytes in .text
         mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
@@ -454,94 +455,6 @@ def inspect_many_results(
     make_simple_pdf(tot_ends_missed_length, "Distribution of FP distance from TP", "Frequency", f"PDF of FP delta TP ", Path(graph_path) )
     return
 
-
-
-
-#@app.command()
-#def inspect_many_results(
-#    results: Annotated[str,typer.Argument(
-#                callback=iterable_path_deep_callback)],
-#    bins: Annotated[str,typer.Argument(
-#                callback=iterable_path_shallow_callback)],
-#    graph_path: Annotated[str, typer.Argument(
-#                callback=new_file_callback
-#                    )],
-#    ):
-#    '''
-#    Inspect many results, specifically examine correct function 
-#    starts that had incorrect lengths
-#    '''
-#
-#    matching_files = {}
-#    results = [x for x in results if x.is_file() and "result.npz" in x.name]
-#
-#    for bin_path in bins:
-#        matching = False
-#        for res_file in [x for x in results ]:
-#            if res_file.name.replace("_result.npz","") == bin_path.name:
-#                matching_files[bin_path] = res_file
-#                matching = True
-#        if not matching:
-#            raise typer.Abort("Some bins dont have matching result files")
-#
-#    # Observe the tp func starts but the incorrect lengths
-#    tot_missed_ends = func_incorrect_lens([],[],[])
-#    for bin_path in alive_it(bins):
-#
-#        # 1  - Ground truth for bin file 
-#        gnd_truth = lief_gnd_truth(bin_path.resolve())
-#        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-#                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
-#
-#        # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
-#        #     are out-of-bounds of the lief functions (these are functions that are
-#        #       likely outside of the .text section)
-#        ida_funcs = read_ida_npz(matching_files[bin_path])
-#
-#        # 4 - Mask the array so we only include bytes in .text
-#        mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
-#        ida_funcs = ida_funcs[mask_max]
-#
-#        mask_min = (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs))
-#        filt_ida_funcs = ida_funcs[mask_min]
-#
-#
-#        # Check to see how many false negative there were 
-#        for i, row in enumerate(gnd_matrix):
-#            if i >= filt_ida_funcs.shape[0]:
-#                continue
-#            if row[0] == filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
-#                tot_missed_ends.tp_start_addrs.append(row[0])
-#                tot_missed_ends.incorrect_lens.append(filt_ida_funcs[i][1])
-#                tot_missed_ends.correct_lens.append(row[1])
-#            #if row[0] != filt_ida_funcs[i][0] and row[1] !=  filt_ida_funcs[i][1]:
-#            #    missed_both.start_addrs.append(row[0])
-#            #    missed_both.lengths.append(filt_ida_funcs[i][1])
-#
-#    ends_missed_length = [x-y for (x,y) in zip(tot_missed_ends.correct_lens, tot_missed_ends.incorrect_lens)]
-#    total_missed_by = sum(ends_missed_length)
-#
-#
-#    print(f"Total miss length {total_missed_by}")
-#    avg_missed_ends = total_missed_by / len(tot_missed_ends.incorrect_lens)
-#    print(f"Avg missed {avg_missed_ends}")
-#    print(f"Mean: {np.mean(ends_missed_length)}")
-#    print(f"Median: {np.median(ends_missed_length)}")
-#    print(f"Mode: {stats.mode(ends_missed_length)}")
-#
-#    freqs, bin_edges = np.histogram(ends_missed_length, bins=4)
-#
-#    print(f"Bins edges: {bin_edges}")
-#    print(f"Count: {freqs}")
-#
-#    make_simple_plot(tot_missed_ends.tp_start_addrs, ends_missed_length, "TP function start addresses", "Distance between the FP end nearest correct end from gnd truth", "O1 IDA missed by amoutns" , graph_path )
-#
-#    make_simple_pdf(tot_missed_ends.tp_start_addrs, ends_missed_length, "Bins", "Frequency", "PDF" , Path(f"{graph_path.name}_pdf_graph_of_all_results") )
-#
-#
-#    return
-
-
 @app.command()
 def inspect_single_results(
     result: Annotated[str,typer.Argument(callback=iterable_path_deep_callback)],
@@ -565,7 +478,7 @@ def inspect_single_results(
     # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
     #     are out-of-bounds of the lief functions (these are functions that are
     #       likely outside of the .text section)
-    ida_funcs = read_ida_npz(result_path)
+    ida_funcs = load_ida_prediction(result_path)
 
     # 4 - Mask the array so we only include bytes in .text
     mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
@@ -849,359 +762,38 @@ def read_results(
     print(f"Bounds: {calc_metrics(total_bound_conf)}")
     return
 
+@app.command()
+def analyze_distances_cmd(
+    prediction: Annotated[str,typer.Argument(help="Prediction npz")],
+    bin: Annotated[str,typer.Argument(help="Binary file")],
+    ):
 
+    pred_npy = load_ida_prediction(Path(prediction).resolve())
+    print(f"got npy {pred_npy.shape}")
+    pred_matrix = np.concatenate((pred_npy[:,0].reshape(-1,1),
+                                 (pred_npy[:,0]+pred_npy[:,1]).reshape(-1,1)),axis=1)
+    print("Made matrix")
 
+    gnd_truth = lief_gnd_truth(Path(bin).resolve())
+    # NOTICE: IMPORTANT... xda seems to the first byte outside of the function 
+    #               as the end of the function 
+    lengths_adjusted = gnd_truth.func_lens
+    ends = gnd_truth.func_addrs + lengths_adjusted
+    gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+                                ends.T.reshape(-1,1)), axis=1)
 
-#@app.command()
-#def old_read_results(
-#    input_dir : Annotated[str,typer.Argument()],
-#    bin_dir: Annotated[str, typer.Argument()],
-#    verbose: Annotated[bool, typer.Option()] = False,
-#    ):
-#    '''
-#    Read the input dir and compute results using the lief module
-#    '''
-#
-#    input_path = Path(input_dir)
-#    if not input_path.exists(): 
-#        print(f"Inp dir {input_dir} is not a dir")
-#        return
-#
-#    bin_path = Path(bin_dir)
-#    if not bin_path.exists():
-#        print(f"Bin dir {bin_dir} is not a dir")
-#        return
-#
-#    matching_files = {}
-#    for bin in bin_path.glob('*'):
-#        matching = False
-#        for res_file in input_path.rglob('*'):
-#            if ".npz" not in res_file.name:
-#                continue
-#            if res_file.name.replace("_result.npz","") == bin.name:
-#                matching_files[bin] = res_file
-#                matching = True
-#        if not matching:
-#            print(f"Never found {bin.name}")
-#
-#
-#    if len(matching_files.keys()) != len(list(bin_path.glob('*'))):
-#        msg = f"Found {len(matching_files.keys())}: {matching_files.keys()}"
-#        print(f"{matching_files.keys()}")
-#        print(f"Some bins don't have matching result file")
-#        raise Exception(msg)
-#
-#
-#    total_start_conf = ConfusionMatrix(0,0,0,0)
-#    total_bound_conf = ConfusionMatrix(0,0,0,0)
-#    total_bytes = 0
-#
-#    for bin in alive_it(list(matching_files.keys())):
-#        # Init the confusion matrix for this bin
-#        start_conf = ConfusionMatrix(0,0,0,0)
-#        bound_conf = ConfusionMatrix(0,0,0,0)
-#
-#        # 1  - Ground truth for bin file, func addr, len
-#        gnd_truth = lief_gnd_truth(bin.resolve())
-#        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-#                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
-#
-#        # 2 - Find the npz with the ida funcs and addrs, chop of functions that 
-#        #     are out-of-bounds of the lief functions (these are functions that are
-#        #       likely outside of the .text section)
-#        ida_funcs = read_ida_npz(matching_files[bin])
-#
-#        # 4 - Mask the array so we only include bytes in .text
-#        #mask_max = (ida_funcs[:,0] <= np.max(gnd_truth.func_addrs))
-#        mask = ((ida_funcs[:,0] <= np.max(gnd_truth.func_addrs)) & 
-#                (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs)))
-#        #ida_funcs = ida_funcs[mask_max]
-#
-#        #print(f"Bin: {bin} Mask uses min {np.min(gnd_truth.func_addrs)} and max {np.max(gnd_truth.func_addrs)}")
-#
-#        #mask_min = (ida_funcs[:,0] >= np.min(gnd_truth.func_addrs))
-#        #filt_ida_funcs = ida_funcs[mask_min]
-#        filt_ida_funcs = ida_funcs[mask]
-#
-#        # 3 - Compare the two lists
-#        # Get all the start addrs that are in both, in ida only, in gnd_trush only
-#        start_conf.tp=len(np.intersect1d(gnd_matrix[:,0], filt_ida_funcs[:,0]))
-#        start_conf.fp=len(np.setdiff1d( filt_ida_funcs[:,0], gnd_matrix[:,0] ))
-#        start_conf.fn=len(np.setdiff1d(gnd_matrix[:,0], filt_ida_funcs[:,0]))
-#
-#
-#        # tp + fp = Total predicted
-#        if not start_conf.tp + start_conf.fp == filt_ida_funcs.shape[0]:
-#            print(f"{start_conf.tp}")
-#            print(f"{start_conf.fp}")
-#            print(f"{filt_ida_funcs.shape[0]}")
-#            raise Exception
-#
-#        # tp + fn = total pos
-#        if not start_conf.tp + start_conf.fn == gnd_matrix.shape[0]:
-#            print(f"{start_conf.fp}")
-#            print(f"{start_conf.fn}")
-#            print(f"{filt_ida_funcs.shape[0]}")
-#            raise Exception
-#
-#
-#        #bound_conf.tp = np.count_nonzero(np.all(np.isin(filt_ida_funcs, gnd_matrix),axis=1))
-#
-#
-#
-#        ## The above is a test of an old code implementation ^^
-#
-#
-#        for row in filt_ida_funcs:
-#            if np.any(np.all(row == gnd_matrix, axis=1)): 
-#                bound_conf.tp+=1
-#
-#        bound_conf.fp = filt_ida_funcs.shape[0] - bound_conf.tp
-#        bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
-#
-#        total_bytes += gnd_truth.num_bytes
-#
-#        total_start_conf.tp += start_conf.tp
-#        total_start_conf.fp += start_conf.fp
-#        total_start_conf.fn += start_conf.fn
-#
-#        total_bound_conf.tp += bound_conf.tp
-#        total_bound_conf.fp += bound_conf.fp
-#        total_bound_conf.fn += bound_conf.fn
-#
-#        if verbose:
-#            print(f"binary: {bin.name}")
-#            print(f"Starts: {start_conf}")
-#            print(f"Starts Metrics: {calc_metrics(start_conf)}")
-#            print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
-#
-#    print(f"Start conf: {total_start_conf}")
-#    print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
-#    print(f"Bound conf: {total_bound_conf}")
-#    print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
-#    return 
+    starts, ends, bounds = analyze_distances(gnd_matrix, pred_matrix)
 
-def read_ida_npz(inp: Path)->np.ndarray:
-    '''
-    Read the ida npz
-    '''
-    npz_file = np.load(inp)
-    return npz_file[list(npz_file.keys())[0]].astype(int)
+    print(f"Done")
+    print(f"Max starts {np.max(starts)}")
+    print(f"Max ends {np.max(ends)}")
+    print(f"Max bounds {np.max(bounds)}")
+    print(f"Bounds avg: {np.mean(bounds)}")
+    print(f"Bounds median: {np.median(bounds)}")
+    print(f"Missed bounds: {np.count_nonzero(bounds)}")
+    print(f"Total bound predictions: {bounds.shape[0]}")
+    return
 
-
-
-#@app.command()
-#def batch_get_funcs(
-#               inp_dir: Annotated[str, typer.Argument(help="Directory with bins")],
-#               out_dir: Annotated[str, typer.Argument(help="Directory to output logs")], 
-#               strip: Annotated[bool, typer.Option(help="Strip the files before running")] = False, 
-#               ):
-#    '''
-#    Batch run ida on bins
-#    '''
-#
-#    out_path = Path(out_dir)
-#
-#    if not out_path.exists():
-#        out_path.mkdir()
-#        return
-#
-#    # Make the time dir
-#    time_dir = out_path.parent / f"{Path(out_dir).name}_TIME"
-#    if not time_dir.exists():
-#        time_dir.mkdir()
-#
-#    # Get a list of files
-#    files = list(Path(inp_dir).rglob('*'))
-#
-#    # For each file get the functions from IDA 
-#    for file in alive_it(files):
-#
-#        # If strip, strip the file 
-#        if strip:
-#            nonstrip = file
-#            file =  gen_strip_file(file)
-#
-#        # Ge the ida funcs
-#        funcs, runtime = get_ida_funcs(file)
-#
-#        # Delete the stripped file
-#        if strip:
-#            file.unlink()
-#            file = nonstrip
-#
-#        # The result file a a path obj
-#        resfile = Path(out_dir) / f"{file.name}_RESULT"
-#        time_file = time_dir / f"{resfile.name}_runtime"
-#
-#        # Save the funcs to the out file
-#        with open(Path(resfile), 'w') as f:
-#            for func in funcs:
-#                f.write(f"{func[0].strip()}, {func[1].strip()}\n")
-#        with open(time_file, 'w') as f:
-#            f.write(f"{runtime}")
-#    return 
-
-
-#@dataclass
-#class FileBundles:
-#    same: np.ndarray
-#    lief_unique: np.ndarray
-#    ida_unique: np.ndarray
-
-#TODO: Remove new format as it gets phased out 
-#TODO: This function only works when I am using the specific IDA script,
-#       I should specificy somewhere that this ONLY works for list_function_bounds
-#def read_res(inp:Path, bin, new_format=True):
-#    '''
-#    Parse the IDA log file for a given analysis on a binary for functions
-#    '''
-#
-#    lief_funcs = get_functions(bin)
-#    gnd = {x.addr : (x.name, x.size) for x in lief_funcs}
-#    gnd_start = np.array([int(x) for x in gnd.keys()])
-#    gnd_ends = np.array([int(x+gnd[x][1]) for x in gnd.keys()])
-#
-#    ida_starts = [] 
-#    ida_ends = [] 
-#
-#
-#    # Read the result 
-#    with open(inp, 'r') as f:
-#        for line in f.readlines():
-#            if new_format:
-#                ida_starts.append(line.strip().split(',')[0].strip())
-#                ida_ends.append(line.strip().split(',')[1].strip())
-#                #res.append((int(start_addr),int(end_addr)))
-#            else:
-#                line = line.strip().split(',')[0].strip()
-#                ida_starts.append(int(line,16))
-#
-#    starts_bundle = FileBundles(
-#        np.intersect1d(gnd_start, ida_starts),
-#        np.setdiff1d( gnd_start, ida_starts),
-#        np.setdiff1d( ida_starts, gnd_start),
-#    )
-#
-#    # Each is a list of addresses
-#    #starts_same = np.intersect1d(gnd_start, ida_starts)
-#    #starts_lief_only = np.setdiff1d( gnd_start, ida_starts)
-#    #starts_ida_only = np.setdiff1d( ida_starts, gnd_start )
-#
-#    # Get the ends results 
-#    if new_format:
-#        ends_bundle = FileBundles(
-#            np.intersect1d(gnd_ends, ida_ends),
-#            np.setdiff1d( gnd_ends, ida_ends),
-#            np.setdiff1d( ida_ends, gnd_ends),
-#        )
-#    else:
-#        ends_bundle = FileBundles(np.array([]),np.array([]), np.array([]))
-#
-#    return starts_bundle, ends_bundle
-#    #return starts_same, starts_lief_only, starts_ida_only
-
-
-#TODO: Convert the old logs, which logged found functions using hex, to the new logs, which 
-#      logs found funcs using base 10
-#@app.command()
-#def read_results(
-#        inp_dir: Annotated[str, typer.Argument(help="Directory with results")],
-#        bin_dir: Annotated[str, typer.Argument(help="Directory with bins")],
-#        time_dir: Annotated[str, typer.Argument(help="Directory with time")],
-#        is_new_format: Annotated[bool, typer.Option(help="Switch to off if results seem low. Older logs require this option to be false")]=True,
-#    ):
-#
-#    files = Path(inp_dir).glob('*')
-#    bins = Path(bin_dir).glob('*')
-#
-#    tot_size = 0
-#    # Get the size of the stripped bins 
-#    for bin in bins:
-#        stripped_bin = gen_strip_file(bin)
-#        tot_size+=stripped_bin.stat().st_size
-#        stripped_bin.unlink()
-#
-#    tot_time = 0
-#    for bin in Path(time_dir).rglob('*'):
-#        with open(bin, 'r') as inp:
-#            tot_time += float(inp.readline().strip())
-#
-#
-#    src = []
-#    for file in files:
-#        bin = Path(f"{bin_dir}/{file.name.replace('_RESULT','')}")
-#        src.append((file,bin))
-#
-#
-#    starts_conf_matrix = ConfusionMatrix(0,0,0,0)
-#    ends_conf_matrix = ConfusionMatrix(0,0,0,0)
-#
-#
-#    for (file,bin) in alive_it(src):
-#        if is_new_format:
-#            #same, lief_o, ida_o = read_res(file,bin,new_format=False)
-#            starts, ends = read_res(file,bin,new_format=True)
-#        else:
-#            starts, ends = read_res(file,bin,new_format=False)
-#            #same, lief_o, ida_o = read_res(file,bin)
-#
-#        starts_conf_matrix.tp += len(starts.same)
-#        starts_conf_matrix.fp += len(starts.ida_unique)
-#        starts_conf_matrix.fn += len(starts.lief_unique)
-#
-#        ends_conf_matrix.tp += len(ends.same)
-#        ends_conf_matrix.fp += len(ends.ida_unique)
-#        ends_conf_matrix.fn += len(ends.lief_unique)
-#
-#
-#        #tot_same += len(same)
-#        #tot_lief_only += len(lief_o)
-#        #tot_ida_only += len(ida_o)
-#
-#    try:
-#        starts_recall = starts_conf_matrix.tp / (starts_conf_matrix.tp + starts_conf_matrix.fn)
-#        ends_recall = ends_conf_matrix.tp / (ends_conf_matrix.tp + ends_conf_matrix.fn)
-#
-#        starts_prec = starts_conf_matrix.tp / (starts_conf_matrix.tp + starts_conf_matrix.fp)
-#        ends_prec = ends_conf_matrix.tp / (ends_conf_matrix.tp + ends_conf_matrix.fp)
-#
-#        start_f1 = (2*starts_prec*starts_recall)/(starts_prec+starts_recall)
-#        end_f1 = (2*ends_prec*ends_recall)/(ends_prec+ends_recall)
-#    except ZeroDivisionError as e:
-#        print(f"One of the tests resulted in: precision+recall == 0, or fp+tp=0, or tp+fn=0")
-#        print(e)
-#        print(starts_conf_matrix)
-#        print(ends_conf_matrix)
-#        return
-#
-#    # Recall = # Correct Pos lbls /  # Ground Trurth Pos lbls
-#    # Recall = tp / (tp+fn) 
-#    #recall = tot_same / (tot_same+tot_lief_only)
-#
-#    # Prec = #pos_lbl / #
-#    # Prec = tp / (tp+fp)
-#    #prec = tot_same / (tot_same + tot_ida_only)
-#
-#    # F1 
-#    #f1 = (2*prec*recall)/(prec+recall)
-#
-#    print(f"Starts............")
-#    print(f"Recall:{starts_recall}")     
-#    print(f"Prev:{starts_prec}")
-#    print(f"F1:{start_f1}")
-#    print(f"=========== ENDS ============")
-#    print(f"Recall:{ends_recall}")     
-#    print(f"Prev:{ends_prec}")
-#    print(f"F1:{end_f1}")
-#    print(f"Size:{tot_size}")
-#    print(f"Time:{tot_time}")
-#    print(f"BPS:{tot_size/tot_time}")
-#    print(f"============ START CONF MARTIX ==========")
-#    print(starts_conf_matrix)
-#    print(f"============ END CONF MARTIX ==========")
-#    print(ends_conf_matrix)
-#    return
 
 
 
