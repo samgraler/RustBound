@@ -764,35 +764,96 @@ def read_results(
 
 @app.command()
 def analyze_distances_cmd(
-    prediction: Annotated[str,typer.Argument(help="Prediction npz")],
-    bin: Annotated[str,typer.Argument(help="Binary file")],
+    results: Annotated[str,typer.Argument(
+        callback = iterable_path_deep_callback
+                )],
+    bins: Annotated[str, typer.Argument(
+        callback = iterable_path_shallow_callback
+                )],
     ):
+    '''
+    Analyze the distance missed
+    '''
 
-    pred_npy = load_ida_prediction(Path(prediction).resolve())
-    print(f"got npy {pred_npy.shape}")
-    pred_matrix = np.concatenate((pred_npy[:,0].reshape(-1,1),
-                                 (pred_npy[:,0]+pred_npy[:,1]).reshape(-1,1)),axis=1)
-    print("Made matrix")
 
-    gnd_truth = lief_gnd_truth(Path(bin).resolve())
-    # NOTICE: IMPORTANT... xda seems to the first byte outside of the function 
-    #               as the end of the function 
-    lengths_adjusted = gnd_truth.func_lens
-    ends = gnd_truth.func_addrs + lengths_adjusted
-    gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-                                ends.T.reshape(-1,1)), axis=1)
+    matching_files = {}
+    results = [x for x in results if x.is_file() and "result.npz" in x.name]
 
-    starts, ends, bounds = analyze_distances(gnd_matrix, pred_matrix)
+    for bin_path in bins:
+        matching = False
+        for res_file in results:
+            if res_file.name.replace("_result.npz","") == bin_path.name:
+                matching_files[bin_path] = res_file
+                matching = True
+        if not matching:
+            raise typer.Abort("Some bins dont have matching result files")
 
-    print(f"Done")
-    print(f"Max starts {np.max(starts)}")
-    print(f"Max ends {np.max(ends)}")
-    print(f"Max bounds {np.max(bounds)}")
-    print(f"Bounds avg: {np.mean(bounds)}")
-    print(f"Bounds median: {np.median(bounds)}")
-    print(f"Missed bounds: {np.count_nonzero(bounds)}")
-    print(f"Total bound predictions: {bounds.shape[0]}")
+    print(matching_files)
+
+    tot_ends = []
+    for (bin, prediction) in alive_it(matching_files.items()):
+        pred_npy = load_ida_prediction(Path(prediction).resolve())
+        pred_matrix = np.concatenate((pred_npy[:,0].reshape(-1,1),
+                                     (pred_npy[:,0]+pred_npy[:,1]).reshape(-1,1)),axis=1)
+
+        gnd_truth = lief_gnd_truth(bin)
+        # NOTICE: IMPORTANT... xda seems to the first byte outside of the function 
+        #               as the end of the function 
+        lengths_adjusted = gnd_truth.func_lens
+        ends = gnd_truth.func_addrs + lengths_adjusted
+        gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+                                    ends.T.reshape(-1,1)), axis=1)
+
+
+        starts_delta, ends_delta, bounds = analyze_distances(gnd_matrix, pred_matrix)
+        tot_ends.extend(list(ends_delta))
+        # The pdf now bins the misses, say bin size of 4, center at 0
+
+    tot_ends = np.array(tot_ends)
+    ends_delta = tot_ends[(tot_ends >= -2000) & (tot_ends <= 2000)]
+    # Define the bin size
+    bin_size = 32
+    num_bins = int(np.ceil((np.max(ends_delta)- np.min(ends_delta)) / bin_size))
+
+
+    # Calculate the histogram
+    #hist, bins = np.histogram(y, bins=np.arange(min(y), max(y) + bin_size, bin_size))
+
+    freqs, bin_edges = np.histogram(ends_delta, bins=num_bins)
+
+    print(f"max freqs: {np.max(freqs)}")
+    print(f"sum freqs: {np.sum(freqs)}")
+    print(freqs)
+    print(bin_edges)
+
+    # need to make a PDF
+    # percent predictions in bin = freq of bin / total predictions
+    freqs = freqs / np.sum(freqs) 
+
+    bin_edges = np.arange(start=np.min(ends_delta), stop=np.max(ends_delta)+bin_size )
+    #print(f"Frequeness: {freqs}")
+    #print(f"Bin Edges: {bin_edges}")
+
+    # Plot the histogram
+    #plt.bar(bin_edges[:-1], freqs, width=bin_size, align='center')
+    #plt.hist(ends_delta, bins=bin_edges, color='red', edgecolor='black')
+    plt.hist(freqs, bins=bin_edges, color='red', edgecolor='black')
+
+    # Set the x-axis to have its center at 0
+    plt.xlim(-2000, 2000) #max(abs(y))-.8*max(abs(y)))
+    #plt.ylim(0, sorted(freqs)[-3] + .05*(sorted(freqs)[-1]))
+    #plt.ylim(0, 5000)
+    
+    # Add labels and title
+    plt.xlabel("Binned missed distance")
+    plt.ylabel("Frequency")
+    plt.title("Ends Delta PDF")
+    print("Saving...")
+    savepath = Path(f"{bin.name}_ends_pdf")
+    plt.savefig(savepath)
+    print(f"Saved to {savepath.resolve()}...")
     return
+
 
 
 

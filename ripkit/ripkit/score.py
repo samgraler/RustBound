@@ -212,7 +212,7 @@ def analyze_distances(gnd:np.ndarray, pred:np.ndarray):
     end_distances = np.empty_like(pred[:,1], dtype=pred.dtype)
     # Iterate over prediction, and find the nearest address in the gnd prediction
     for i, addr in enumerate(pred[:,1].tolist()):
-        min_index = np.argmin(gnd[:,1]-addr)
+        min_index = np.argmin(np.abs(gnd[:,1]-addr))
         end_distances[i]  = gnd[min_index,1]  - addr
 
     ends_tp = np.count_nonzero(end_distances==0)
@@ -224,7 +224,7 @@ def analyze_distances(gnd:np.ndarray, pred:np.ndarray):
     start_distances = np.empty_like(pred[:,0], dtype=pred.dtype)
     # Iterate over prediction, and find the nearest address in the gnd prediction
     for i, addr in enumerate(pred[:,0].tolist()):
-        min_index = np.argmin(gnd[:,0]-addr)
+        min_index = np.argmin(np.abs(gnd[:,0]-addr))
         start_distances[i]  = gnd[min_index,0] - addr
 
     starts_tp = np.count_nonzero(start_distances==0)
@@ -248,7 +248,7 @@ def analyze_distances(gnd:np.ndarray, pred:np.ndarray):
         # Element wise addition
         total_delts = start_delts + end_delts
 
-        min_index = np.argmin(total_delts )
+        min_index = np.argmin(np.abs(total_delts ))
 
         bound_distances[i,0] = gnd[min_index,0] - start
         bound_distances[i,1] = gnd[min_index,1] - end

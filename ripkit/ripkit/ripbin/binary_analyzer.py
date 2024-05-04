@@ -89,6 +89,8 @@ def lief_gnd_truth(bin_path: Path):
 
     # This enumerate the .text byte and sees which ones are functions
     for i, _ in enumerate(text_bytes):
+        # The current address is the base image address, plus the text section 
+        # virtual address plus the current byte in text bytes
         address = base_address + text_section.virtual_address + i
         if address in func_start_addrs.keys():
             func_addrs.append(address)

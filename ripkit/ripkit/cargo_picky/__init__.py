@@ -1,8 +1,8 @@
 
-from ..bin_types import (
-    RegBit,
-    FileFormat
-)
+#from .bin_types import (
+#    RegBit,
+#    FileFormat
+#)
 
 from .crates_io import (
     pull_registry,
@@ -21,6 +21,7 @@ from .cargo_builder import (
     build_crate,
     get_target_productions,
     is_executable,
+    find_built_files,
 )
 
 #from .cargo_reg_puller import (

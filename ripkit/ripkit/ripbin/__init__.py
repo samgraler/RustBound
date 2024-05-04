@@ -25,6 +25,7 @@ from .binary_analyzer import (
 )
 
 from .ripbin_deterministic_db import (
+    stash_bin,
     save_analysis,
     RustFileBundle,
     calculate_md5,

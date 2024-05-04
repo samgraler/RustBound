@@ -117,7 +117,7 @@ def build_crate(crate: str,
             subprocess.check_output(cmd, shell=True)
 
     except Exception as e:
-        raise CrateBuildException
+        raise CrateBuildException(str(e))
     return
 
 
@@ -192,11 +192,9 @@ def is_executable(path: Path)->bool:
     try:
         if not path.is_file():
             return False
-
-
         # This will through an exeption if the file type is not 
         # elf or pe or macho
-        f_type = get_file_type(path)
+        #f_type = get_file_type(path)
 
         # TODO: So for some reason lief.parse() prints 
         # to stdout when the file type is unknown AND 
@@ -207,7 +205,9 @@ def is_executable(path: Path)->bool:
         if not hasattr(bin, "format"):
             return False
         elif bin.format in [lief.EXE_FORMATS.PE,
-                        lief.EXE_FORMATS.ELF]:
+                        lief.EXE_FORMATS.ELF,
+                            lief.EXE_FORMATS.MACHO,
+                            lief.EXE_FORMATS.UNKNOWN]:
             return True
         return False
     except Exception as e:
@@ -267,10 +267,11 @@ def get_target_productions(crate: str, target: RustcTarget,
     target_dir = Path(LocalCratesIO.CRATES_DIR.value).joinpath(crate).joinpath("target")
 
     # If the specific target exists as a sub dir of the general target 
-    # dir, grab the files of interest from it 
-    if (dir:=target_dir.joinpath(str(target.value))).exists():
-        return find_built_files(dir,target_suffixes,exclude_suffixes)
-    return []
+    deep_target_dir = target_dir.joinpath(str(target.value))
+    if not deep_target_dir.exists():
+        return []
+    else:
+        return find_built_files(deep_target_dir,target_suffixes,exclude_suffixes)
 
 
 

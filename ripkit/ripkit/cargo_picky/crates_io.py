@@ -15,7 +15,6 @@ CRATES_IO_REG = CRATES_IO_DIR / "cratesio_reg.csv"
 class LocalCratesIO(Enum):
     CRATES_DIR = str(CLONED_CRATES_DIR.resolve())
 
-    
 
 def init_crates_io():
     '''

@@ -23,12 +23,12 @@ class FileType(Enum):
 
 
 class RustcOptimization(Enum):
-    O0 = "O0"
-    O1 = "O1"
-    O2 = "O2"
-    O3 = "O3"
-    OS = "Os"
-    OZ = "Oz"
+    O0 = "0"
+    O1 = "1"
+    O2 = "2"
+    O3 = "3"
+    OS = "s"
+    OZ = "z"
 
 class RustcStripFlags(Enum):
     """ 
