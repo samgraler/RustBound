@@ -22,7 +22,6 @@ import json
 from typing_extensions import Annotated
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
-import polars as pl
 
 from rich.console import Console
 from rich.table import Table
@@ -38,18 +37,8 @@ app.add_typer(cargo_db_cli.app, name="cargo")
 app.add_typer(ripbin_cli.app, name="ripbin")
 
 from ripkit.cargo_picky import (
-    gen_cargo_build_cmd,
-    gen_cross_build_cmd,
-    get_target_productions,
-    is_executable,
-    init_crates_io,
-    crates_io_df,
-    clone_crate,
-    is_remote_crate_exe,
-    LocalCratesIO,
     build_crate,
     RustcStripFlags,
-    RustcOptimization,
     RustcTarget,
     CrateBuildException,
 )
@@ -64,8 +53,6 @@ from ripkit.ripbin import (
     disasm_at,
 )
 
-from ripkit.score import analyze_distances
-
 from cli_utils import opt_lvl_callback, get_enum_type
 import math
 
@@ -73,219 +60,43 @@ num_cores = multiprocessing.cpu_count()
 
 CPU_COUNT_75 = math.floor(num_cores * (3/4))
 
+@dataclass
+class arch_stats():
+    files: int
+    size: int
+    funcs: int
 
-# def build_and_stash(
-#     crate,
-#     opt,
-#     target,
-#     strip=RustcStripFlags.NOSTRIP,
-#     use_cargo=False,
-# ):
-#     '''
-#     Build and stash create in ripbin db
-#     '''
-#
-#     # Build the crate
-#     build_crate(crate, opt, target, strip, use_cargo=use_cargo)
-#
-#     # Need this to get the build command
-#     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
-#
-#     # Need the build command for the bundle info, this is NOT used
-#     # to actually exectue a build command
-#     if use_cargo:
-#         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
-#     else:
-#         build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
-#
-#     # Get files of interest from the crate at the target <target>
-#     files_of_interest = [
-#         x for x in get_target_productions(crate, target) if is_executable(x)
-#     ]
-#
-#     if files_of_interest == []:
-#         print(f"Crate {crate} had no build executable productions")
-#         # TODO: in the crates_io cache which cloned pkgs don't build any
-#         #       files of interest so they are not rebuilt
-#         return 99
-#
-#     # The only file in the list should be the binary
-#     binary = files_of_interest[0]
-#
-#     # Create the file info
-#     binHash = calculate_md5(binary)
-#
-#     filetype = ""
-#
-#     # Create the file info
-#     info = RustFileBundle(binary.name, binHash, target.value, filetype,
-#                           opt.value, binary.name, "", build_cmd)
-#
-#     try:
-#         # Save analyiss
-#         stash_bin(binary, info, overwrite_existing=True)
-#     except Exception as e:
-#         print(f"Exception {e} in crate {crate}")
-#
-#     return
-#
+@dataclass
+class FoundFunctions():
+    addresses: np.ndarray
+    names: List[str]
 
-# def build_analyze_crate(crate,
-#                         opt,
-#                         target,
-#                         filetype,
-#                         strip=RustcStripFlags.NOSTRIP,
-#                         use_cargo=True):
-#     '''
-#     Helper function to build then analyze the crate
-#     '''
-#
-#     # Build the crate
-#     build_crate(crate, opt, target, strip, use_cargo=use_cargo)
-#
-#     # Need this to get the build command
-#     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
-#
-#     # Need the build command for the bundle info, this is NOT used
-#     # to actually exectue a build command
-#     if use_cargo:
-#         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
-#     else:
-#         build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
-#
-#     # Get files of interest from the crate at the target <target>
-#     files_of_interest = [
-#         x for x in get_target_productions(crate, target) if is_executable(x)
-#     ]
-#
-#     if files_of_interest == []:
-#         print(f"Crate {crate} had no build executable productions")
-#         # TODO: in the crates_io cache which cloned pkgs don't build any
-#         #       files of interest so they are not rebuilt
-#         return 99
-#
-#     # The only file in the list should be the binary
-#     binary = files_of_interest[0]
-#
-#     # Create the file info
-#     binHash = calculate_md5(binary)
-#
-#     # Create the file info
-#     info = RustFileBundle(binary.name, binHash, target.value, filetype,
-#                           opt.value, binary.name, "", build_cmd)
-#
-#     # Generate analysis
-#     data = generate_minimal_labeled_features(binary)
-#
-#     try:
-#         # Save analyiss
-#         save_analysis(binary,
-#                       data,
-#                       AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
-#                       info,
-#                       overwrite_existing=False)
-#     except Exception as e:
-#         print(f"Exception {e} in crate {crate}")
-#
-#     return 0
-#
 
-# def get_all_target_bins(target: RustcTarget):
-#     '''
-#     Get all binaries by the optimization and that are of target target
-#     '''
-#     bin_by_opt = {
-#         '0': [],
-#         '1': [],
-#         '2': [],
-#         '3': [],
-#         'z': [],
-#         's': [],
-#     }
-#
-#     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-#         info_file = parent / 'info.json'
-#         info = {}
-#         try:
-#             with open(info_file, 'r') as f:
-#                 info = json.load(f)
-#         except FileNotFoundError:
-#             print(f"File not found: {info_file}")
-#             continue
-#         except json.JSONDecodeError as e:
-#             print(f"JSON decoding error: {e}")
-#             continue
-#         except Exception as e:
-#             print(f"An error occurred: {e}")
-#             continue
-#
-#         # Define the binary file name
-#         bin_file = parent / info['binary_name']
-#         opt = info['optimization']
-#         bin_target = info['target']
-#
-#         if opt not in bin_by_opt.keys():
-#             bin_by_opt[opt] = []
-#
-#         if target.value in bin_target:
-#             bin_by_opt[opt].append(bin_file.resolve())
-#     return bin_by_opt
-#
+@dataclass
+class dataset_stat:
+    files: int
+    file_size: int
+    stripped_size: int
+    text_section_size: int
+    functions: int
+    text_section_functions: int
+    alias_count: int
 
-# def get_all_bins() -> dict:
-#     '''
-#     Get all the binaries by the optimization
-#     '''
-#
-#     bin_by_opt = {
-#         '0': [],
-#         '1': [],
-#         '2': [],
-#         '3': [],
-#         'z': [],
-#         's': [],
-#     }
-#
-#     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-#         info_file = parent / 'info.json'
-#         info = {}
-#         try:
-#             with open(info_file, 'r') as f:
-#                 info = json.load(f)
-#         except FileNotFoundError:
-#             print(f"File not found: {info_file}")
-#             continue
-#         except json.JSONDecodeError as e:
-#             print(f"JSON decoding error: {e}")
-#             continue
-#         except Exception as e:
-#             print(f"An error occurred: {e}")
-#             continue
-#
-#         # Define the binary file name
-#         bin_file = parent / info['binary_name']
-#
-#         opt = info['optimization']
-#
-#         if opt not in bin_by_opt.keys():
-#             bin_by_opt[opt] = []
-#         else:
-#             bin_by_opt[opt].append(bin_file.resolve())
-#     return bin_by_opt
-#
-# @app.command()
-# def print_rust_targets():
-#     '''
-#     Print the rust targets
-#     '''
-#
-#     cmd = shlex.split('rustc --print target-list')
-#
-#     output = subprocess.run(cmd, capture_output=True, universal_newlines=True)
-#     res = output.stdout
-#     print(res)
-#     return
-#
+@dataclass
+class SequenceCounter:
+    sequences: int
+    found_in_nonstart: int 
+    found_only_in_start: int 
+    found_once_in_start: int
+
+    nonstart_occurances:int
+    start_occurances:int
+
+
+
+
+
+
 @app.command()
 def disasm(
     file: Annotated[str, typer.Argument(help="Input file")],
@@ -305,98 +116,6 @@ def disasm(
     for line in res:
         print(line)
     return
-
-#
-# @app.command()
-# def is_crate_exe(crate: Annotated[str, typer.Argument()]):
-#
-#     print(is_remote_crate_exe(crate))
-#     return
-#
-
-# @app.command()
-# def cargo_clone(
-#     crate: Annotated[str, typer.Argument()],
-#     update: Annotated[
-#         bool,
-#         typer.Option(help="Update the crate if its already cloned")] = False):
-#
-#     clone_crate(crate, exist_ok=update)
-#
-#     return
-#
-#
-# @app.command()
-# def show_cratesio(column: Annotated[str, typer.Option()] = '', ):
-#     '''
-#     Show the head of cratesw io dataframe
-#     '''
-#
-#     # Get the df
-#     crates_df = crates_io_df()
-#
-#     if column == '':
-#         print(crates_df.head())
-#     else:
-#         print(crates_df[column])
-#     print(crates_df.columns)
-#
-
-# @app.command()
-# def clone_many_exe(number: Annotated[int, typer.Argument()],
-#                    verbose: Annotated[bool, typer.Option()] = False):
-#     '''
-#     Clone many new executable rust crates.
-#     '''
-#
-#     # Get the remote crate reg
-#     reg = crates_io_df()
-#
-#     # List of crate current installed
-#     installed_crates = [
-#         x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-#         if x.is_dir()
-#     ]
-#
-#     # List of crate names
-#     crate_names = [
-#         x for x in reg['name'].tolist() if x not in installed_crates
-#     ]
-#     print("Finding uninstalled registry...")
-#
-#     # With progress bar, enumerate over the registry
-#     cloned_count = 0
-#     with alive_bar(number) as bar:
-#         for i, crate in enumerate(crate_names):
-#             if i % 100 == 0:
-#                 print(f"Searching... {i} crates so far")
-#             # See if the crate is exe before cloning
-#             if is_remote_crate_exe(crate):
-#                 print(f"Cloning crate {crate}")
-#                 try:
-#                     if verbose:
-#                         clone_crate(crate, debug=True)
-#                     else:
-#                         clone_crate(crate)
-#
-#                     cloned_count += 1
-#                     bar()
-#                 except Exception as e:
-#                     print(e)
-#                     #bar(skipped=True)
-#                 #bar(skipped=True)
-#             # Break out of the loop if enough have cloned
-#             if cloned_count >= number:
-#                 break
-#
-
-# def get_enum_type(enum, input_string) -> Enum:
-#     try:
-#         return enum(input_string)
-#     except Exception:
-#         raise ValueError(
-#             f"No matching enum type for the string '{input_string}'")
-#
 
 @app.command()
 def build(
@@ -425,27 +144,6 @@ def build(
 
     # Match the target to its enum
     target_enum = get_enum_type(RustcTarget, target)
-
-    #if bit == "64":
-    #    if filetype == "elf":
-    #        target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-    #    elif filetype == "pe":
-    #        target = RustcTarget.X86_64_PC_WINDOWS_GNU
-    #    else:
-    #        print("UNknown filetype")
-    #        return
-    #elif bit == "32":
-    #    if filetype == "elf":
-    #        target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-    #    elif filetype == "pe":
-    #        target = RustcTarget.I686_PC_WINDOWS_GNU
-    #    else:
-    #        print("UNknown filetype")
-    #        return
-    #else:
-    #    print("UNknown bit")
-    #    return
-
     if not strip:
         strip_lvl = RustcStripFlags.NOSTRIP
     else:
@@ -518,89 +216,6 @@ def build_all(
                 print(f"Error on {crate}")
 
 
-# @app.command()
-# def build_all(
-#     opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-#     bit: Annotated[str, typer.Argument(help="32 or 64")],
-#     filetype: Annotated[str, typer.Argument(help="pe or elf")],
-#     strip: Annotated[bool, typer.Option()] = False,
-# ):
-#     '''
-#     Build all the installed crates
-#     '''
-#
-#     #TODO: For simpilicity I prompt for only
-#     # 64 vs 32 bit and pe vs elf. Really I
-#     # should prompt for the whole target arch
-#     # b/c theres many different ways to get
-#     # a 64bit pe  or 32bit elf
-#
-#     # Opt lvl call back
-#     try:
-#         opt = opt_lvl_callback(opt_lvl)
-#     except Exception as e:
-#         print(e)
-#         return
-#
-#     if bit == "64":
-#         if filetype == "elf":
-#             target = RustcTarget.X86_64_UNKNOWN_LINUX_GNU
-#         elif filetype == "pe":
-#             target = RustcTarget.X86_64_PC_WINDOWS_GNU
-#         else:
-#             return
-#     elif bit == "32":
-#         if filetype == "elf":
-#             target = RustcTarget.I686_UNKNOWN_LINUX_GNU
-#         elif filetype == "pe":
-#             target = RustcTarget.I686_PC_WINDOWS_GNU
-#         else:
-#             return
-#     else:
-#         return
-#
-#     if not strip:
-#         strip_lvl = RustcStripFlags.NOSTRIP
-#     else:
-#         # SYM_TABLE is the all the symbols
-#         strip_lvl = RustcStripFlags.SYM_TABLE
-#
-#     # List of crate current installed
-#     installed_crates = [
-#         x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-#         if x.is_dir()
-#     ]
-#
-#     for crate in alive_it(installed_crates):
-#
-#         if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-#             build_crate(crate,
-#                         opt,
-#                         target,
-#                         strip_lvl,
-#                         use_cargo=True,
-#                         debug=True)
-#         else:
-#             build_crate(crate, opt, target, strip_lvl)
-#
-#
-# @app.command()
-# def list_cloned():
-#     '''
-#     List the cloned crates
-#     '''
-#
-#     # List of crate current installed
-#     installed_crates = [
-#         x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-#         if x.is_dir()
-#     ]
-#
-#     for crate in installed_crates:
-#         print(crate)
-#     print(f"Thats {len(installed_crates)} crates")
-#
-
 @app.command()
 def analyze(
     bin_path: Annotated[str, typer.Argument()],
@@ -641,12 +256,6 @@ def analyze(
                   AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
                   info,
                   overwrite_existing=overwrite_existing)
-
-@dataclass
-class arch_stats():
-    files: int
-    size: int
-    funcs: int
 
 
 def lief_num_funcs(path: Path):
@@ -1683,23 +1292,6 @@ def get_text_functions(bin_path: Path):
     return FoundFunctions(func_addrs, func_names)
 
 
-@dataclass
-class FoundFunctions():
-    addresses: np.ndarray
-    names: List[str]
-
-
-@dataclass
-class dataset_stat:
-    files: int
-    file_size: int
-    stripped_size: int
-    text_section_size: int
-    functions: int
-    text_section_functions: int
-    alias_count: int
-
-
 def gen_strip_file(bin_path: Path):
     '''
     Strip the passed file and return the path of the 
@@ -1955,13 +1547,6 @@ def profile_epilogues(
     if savepath.exists():
         print(f"Path {savepath} already exists")
         return
-
-    schem = {
-        'epilogue': pl.Series([], dtype=pl.Utf8),
-        'file': pl.Series([], dtype=pl.Utf8),
-        'addr': pl.Series([], dtype=pl.Int64),
-    }
-
     progs = {}
     files = list(Path(dataset).glob('*'))
     for file in alive_it(files):
@@ -2046,19 +1631,6 @@ def profile_epilogues(
     return
 
 
-@dataclass
-class SequenceCounter:
-    sequences: int
-    found_in_nonstart: int 
-    found_only_in_start: int 
-    found_once_in_start: int
-
-    nonstart_occurances:int
-    start_occurances:int
-
-
-
-
 @app.command()
 def profile_prologues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
@@ -2076,12 +1648,6 @@ def profile_prologues(
     if savepath.exists():
         print(f"Path {savepath} already exists")
         return
-
-    schem = {
-        'prologue': pl.Series([], dtype=pl.Utf8),
-        'file': pl.Series([], dtype=pl.Utf8),
-        'addr': pl.Series([], dtype=pl.Int64),
-    }
 
     progs = {}
     files = list(Path(dataset).glob('*'))
@@ -2492,13 +2058,6 @@ def get_function_list(binary: Annotated[str,
     # Get the functions
     functions = get_functions(bin)
 
-    # Add to the prologues dict the prologues
-    bin = lief.parse(str(bin.resolve()))
-    text_section = bin.get_section(".text")
-
-    # Get the base address of the loaded binary
-    base_address = bin.imagebase
-
     for i, func in enumerate(functions):
         print(f"{i}: {func.name} : {func.addr}")
     return
@@ -2568,59 +2127,6 @@ def get_function(
 
     hex_repr = " ".join(str(hex(x)) for x in blist)
     print(f"HEX REPR:\n {hex_repr}")
-    return
-
-
-def make_ends_distance_pdf_graph(
-        bin_size: int,
-        max_delta: int,
-        ends_delta: np.ndarray,
-        xticks: List[int] = [-512, -256, -0, 256, 512, 1024, 2048],
-        xlim: Tuple[int, int] = (-512, 2048),
-        show=False,
-        save=True,
-        savename="ends_pdf.png"):
-    '''
-    Make a PDF graph for the function ends
-    '''
-    bin_size = 32
-    max_edge = max_delta
-
-    # Define the bin size
-    custom_edges = [x for x in range(-max_edge, max_edge - bin_size, bin_size)]
-    # Calculate the PDF (the density=True function makes this a PDF)
-    counts, bin_edges = np.histogram(ends_delta,
-                                     bins=custom_edges,
-                                     density=True)
-
-    #
-    bin_midpoints = (bin_edges[:-1] + bin_edges[1:]) / 2
-    plt.bar(bin_midpoints, counts, width=bin_size, edgecolor='k', alpha=0.7)
-
-    # Add labels and title
-    plt.xlabel("Binned Distances (End Address- Predicted End Address)")
-    plt.xlim(xlim)
-    plt.xticks(xticks)
-    plt.ylabel("Probability of Label in bin (log scale)")
-    plt.yscale('log')
-    plt.title("End Prediction Distance Missed PDF, O3 Binaries")
-
-    if save:
-        savepath = Path(f"{savename}_ends_pdf")
-        plt.savefig(savepath)
-    if show:
-        plt.show()
-
-    return
-
-
-def make_pdf(bins: Annotated[str, typer.Argument(help="Input bins")],
-             res: Annotated[str, typer.Argument(help="results files")],
-             bin_size: Annotated[int, typer.Argument()],
-             x_max: Annotated[int, typer.Argument()],
-             x_min: Annotated[int, typer.Argument()],
-             zero_center: Annotated[bool, typer.Argument()]):
-
     return
 
 
