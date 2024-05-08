@@ -841,8 +841,6 @@ def rnn_predict_bounds(model, unstripped_bin, threshold: float, start: bool):
     lbl_chunk = []
     addrs = []
 
-    #for row in data_gen:
-    # each row is: Start?, Middle?, End?, one_hot_byte
     text_section_start_addr = parsed_bin.imagebase + text_section.virtual_address
     num_loops = 0
 
@@ -1347,98 +1345,6 @@ def save_raw_prediction(raw_res: np.ndarray, out_file):
     np.savez(out_file, raw_res)
     return
 
-
-def calculate_md5(file_path, buffer_size=8192):
-    '''
-    Get the hash of a file. This is helpful for storing binaries of the same 
-    names that were compiled with different flags / for different OSs 
-    '''
-
-    md5_hash = hashlib.md5()
-
-    # Open, read, and take hash of file iterating over the buffers until
-    # there's no more
-    with open(file_path, 'rb') as file:
-        buffer = file.read(buffer_size)
-        while buffer:
-            md5_hash.update(buffer)
-            buffer = file.read(buffer_size)
-
-    # Return the digest
-    return md5_hash.hexdigest()
-
-
-def export_dataset_npzs(
-    bin_names_dir: Annotated[str,
-                             typer.Argument(
-                                 help='Directory of bins to test on')],
-    opt: Annotated[str,
-                   typer.Argument(help='Directory of bins to test on')],
-):
-    """
-    a hopefully temporary funcrion to grab binaries from ripbin db given names of optimization levels
-    """
-
-    bins_path = Path(bin_names_dir)
-    if bins_path.is_dir():
-        bins = list(bins_path, rglob('*'))
-    elif bins_path.is_file():
-        bins = [bins_path]
-    else:
-        print(f"Bins parh does not exist")
-        return
-
-    for bin in alive_it(bins):
-        #hash the bin files
-        bin_hash = calcculate_md5(bin)
-
-        #look up the bin in ripkit
-
-        #for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        #    info_file = parent / 'info.json'
-        #    info = {}
-        #    try:
-        #        with open(info_file, 'r') as f:
-        #            info = json.load(f)
-        #    except FileNotFoundError:
-        #        print(f"File not found: {info_file}")
-        #        continue
-        #    except json.JSONDecodeError as e:
-        #        print(f"JSON decoding error: {e}")
-        #        continue
-        #    except Exception as e:
-        #        print(f"An error occurred: {e}")
-        #        continue
-
-        if info['optimization'].upper() in OPTIMIZATION:
-            npz_file = parent / "onehot_plus_func_labels.npz"
-
-    return
-
-
-# TODO:
-#  I need to have the end TP, FP, and FN for all models.
-#  This needs to be combined to boundaries...
-#
-# Option A:
-#   Run a pass for starts and save npz, Run a pass for ends and save npz.
-#   Read both to get bounds
-#
-#
-# Option B:
-        #start_conf, end_conf, start_addrs, end_addrs = rnn_predict_bounds(model_start, model_end, bin, threshold)
-#  Run two passes. From each pass use the threshold passed as argument to get
-#  a list of starts and a list of ends. Save these in an npz
-
-#TODO: Do I have the space to save the predict probability, or must I make a pass
-#      using the threshold and save only 0s 1s and 2s
-
-
-def save_file_predictions(fpath: Path, predictions: np.ndarray) -> None:
-    np.save(fpath, predictions)
-    return
-
-
 # @app.command()
 # def new_bounds_test(
 #         bins: Annotated[str, typer.Argument(
@@ -1864,22 +1770,22 @@ def test_on_nongpu(
         print(f"Testset {testset_path} doesn't exist")
         return
 
+    logpath = Path(logdir)
+    if not logpath.exists():
+        logpath.mkdir()
+    done_bin_names = [x.name.replace("_res","") for x in logpath.glob('*')]
+
     if testset_path.is_file():
         testfiles = [testset_path]
     else:
         # Load the files from the test set
-        testfiles = list(testset_path.glob('*'))
+        testfiles = [ x for x in testset_path.glob('*') if x.name not in done_bin_names]
 
-    logpath = Path(logdir)
-    if not logpath.exists():
-        logpath.mkdir()
 
 
     tot_start_conf = ConfusionMatrix(0, 0, 0, 0)
     tot_end_conf = ConfusionMatrix(0, 0, 0, 0)
     tot_bound_conf = ConfusionMatrix(0, 0, 0, 0)
-
-    tmp = 0
 
     for bin in alive_it(testfiles):
 
@@ -1902,30 +1808,12 @@ def test_on_nongpu(
             (gnd_truth.func_addrs.T.reshape(-1, 1), ends.T.reshape(-1, 1)),
             axis=1)
 
-
-        # Manually calc end comp
+        # Manually calc end comp to confirm that this matches the end_conf returned 
+        # from the function
         end_tp = len(set(ends) & set(end_addrs))
         end_fp = len(set(end_addrs) - set(ends))
         end_fn = len(set(ends) - set(end_addrs))
         print(f"CUSTOM END CONF: {end_tp}, {end_fp}, {end_fn}")
-
-        if tmp == 0:
-
-
-            with open("START_COMP", 'w') as f:
-                for row in start_addrs:
-                    f.write(f"{row}\n")
-            with open("LIEF_START_COMP", 'w') as f:
-                for row in gnd_truth.func_addrs:
-                    f.write(f"{row}\n")
-
-
-            with open("END_COMP", 'w') as f:
-                for row in end_addrs:
-                    f.write(f"{row}\n")
-            with open("LIEF_END_COMP", 'w') as f:
-                for row in ends:
-                    f.write(f"{row}\n")
 
         # 1. Add a column of all 1s for the start addrs, and a column of all 2s for the end addrs
         all_ones = np.ones((1, len(start_addrs)))
@@ -1967,15 +1855,6 @@ def test_on_nongpu(
             ends = filt_sorted_bounds[filt_sorted_bounds[:, 1] == 2]
             birnn_bounds = np.hstack(
                 (starts[:, 0].reshape(-1, 1), ends[:, 0].reshape(-1, 1)))
-
-        if tmp == 0:
-            tmp=1
-            with open("BOUND_COMP", 'w') as f:
-                for row in birnn_bounds:
-                    f.write(f"{row}\n")
-            with open("LIEF_BOUND_COMP", 'w') as f:
-                for row in gnd_matrix:
-                    f.write(f"{row}\n")
 
         bound_conf.tp = 0
         for row in birnn_bounds:
