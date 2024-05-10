@@ -1884,6 +1884,7 @@ def test_on_nongpu(
             json.dump(
                 {
                     'bin': bin.name,
+                    'bin_path' : str(bin.resolve()),
                     'start_tp': start_conf.tp,
                     'start_fp': start_conf.fp,
                     'start_fn': start_conf.fn,
@@ -1893,6 +1894,8 @@ def test_on_nongpu(
                     'bound_tp': bound_conf.tp,
                     'bound_fp': bound_conf.fp,
                     'bound_fn': bound_conf.fn,
+                    'start_addrs': [int(x) for x in start_addrs],
+                    'end_addrs' : [int(x) for x in end_addrs],
                 }, f)
 
         if verbose:
