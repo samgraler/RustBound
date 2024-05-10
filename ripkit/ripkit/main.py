@@ -62,18 +62,27 @@ CPU_COUNT_75 = math.floor(num_cores * (3/4))
 
 @dataclass
 class arch_stats():
+    '''
+    Architecture Specifics stats when profiling dataset
+    '''
     files: int
     size: int
     funcs: int
 
 @dataclass
 class FoundFunctions():
+    '''
+    Helper Object to make explict found functions
+    '''
     addresses: np.ndarray
     names: List[str]
 
 
 @dataclass
-class dataset_stat:
+class DatasetStat:
+    '''
+    Helper Object for gathering dataset stats
+    '''
     files: int
     file_size: int
     stripped_size: int
@@ -84,6 +93,9 @@ class dataset_stat:
 
 @dataclass
 class SequenceCounter:
+    '''
+    Helper Object to count occurances of sequences in the dataset
+    '''
     sequences: int
     found_in_nonstart: int 
     found_only_in_start: int 
@@ -91,10 +103,6 @@ class SequenceCounter:
 
     nonstart_occurances:int
     start_occurances:int
-
-
-
-
 
 
 @app.command()
@@ -106,6 +114,10 @@ def disasm(
                          typer.Argument(
                              help="Number of bytes to disassameble")],
 ):
+    '''
+    A copy of object dump! Originall this was a proof of concept to 
+    ensure I could parse binaries in python
+    '''
 
     file_path = Path(file)
 
@@ -1312,7 +1324,7 @@ def gen_strip_file(bin_path: Path):
 
 
 @app.command()
-def dataset_stats(
+def DatasetStats(
     dataset: Annotated[str, typer.Argument()], func_size: Annotated[
         int,
         typer.Argument(
@@ -1323,7 +1335,7 @@ def dataset_stats(
 
     bins = list(Path(dataset).glob('*'))
 
-    stats = dataset_stat(0, 0, 0, 0, 0, 0, 0)
+    stats = DatasetStat(0, 0, 0, 0, 0, 0, 0)
 
     # Get the size of the stripped bins
     for bin in alive_it(bins):
