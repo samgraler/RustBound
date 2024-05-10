@@ -9,7 +9,6 @@ from typing import List, Generator
 from typing_extensions import Annotated
 from fairseq.models.roberta import RobertaModel
 import torch
-import sys
 import lief 
 from elftools.elf.elffile import ELFFile
 from dataclasses import dataclass
@@ -19,12 +18,10 @@ from alive_progress import alive_it
 from ripkit.ripbin import ( 
     ConfusionMatrix,
     calc_metrics,
-    save_raw_experiment_three_prob,
     lief_gnd_truth,
 )
 import time
 import typer 
-import rich
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
@@ -782,10 +779,6 @@ def xda_predict_many(inp_files, model, out_dir, save_results=False, use_saved=Tr
         confusion_matrix.fp += res[2]
         confusion_matrix.fn += res[3]
 
-        #tot_tp += res[0]
-        #tot_tn += res[2]
-        #tot_fp += res[1]
-        #tot_fn += res[3]
         print("Running totals:")
         print(f"TP: {confusion_matrix.tp}")
         print(f"TN: {confusion_matrix.tn}")
@@ -1402,72 +1395,3 @@ def jaccard_similarity(inp1:np.ndarray, inp2:np.ndarray):
 if __name__ == '__main__':
     app()
     exit()
-
-    OPTIMIZATION = 'Oz'
-
-    ##TODO: This is best used when I have large similar datasets for O0-Oz
-    ##       until I have all of those compiled I will manually split
-    ##with open("TEST_BIN_NAME_SET.json", 'r') as f:
-    ##    bin_names = json.load(f)['names']
-
-    ## 
-    #rust_files = []
-
-    #for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-    #    info_file = parent / 'info.json'
-    #    info = {}
-    #    try:
-    #        with open(info_file, 'r') as f:
-    #            info = json.load(f)
-    #    except FileNotFoundError:
-    #        print(f"File not found: {info_file}")
-    #        continue
-    #    except json.JSONDecodeError as e:
-    #        print(f"JSON decoding error: {e}")
-    #        continue
-    #    except Exception as e:
-    #        print(f"An error occurred: {e}")
-    #        continue
-
-
-    #    if info['optimization'].upper() in OPTIMIZATION.upper():
-
-    #        bin_file  =  parent / info['binary_name']
-    #        if bin_file.exists():
-    #            rust_files.append(bin_file)
-
-
-    #pretrain_files = rust_files[:50]
-    #finetune_files = rust_files[50:100]
-    #test_files = rust_files[300:]
-
-    #with open("XDA_DATASET_SPLITS", 'w') as f:
-    #    f.write("Pretrain_names\n")
-    #    f.write(", ".join(x.name for x in pretrain_files) + "\n")
-    #    f.write("finetune_names\n")
-    #    f.write(", ".join(x.name for x in finetune_files) + "\n")
-    #    f.write("test_names\n")
-    #    f.write(", ".join(x.name for x in test_files) + "\n")
-
-    test_files = [x for x in Path("ghid_xda_subset_res_O0_20_raw_bin").rglob('*')]
-
-    #checkpoint_dir = "ryans_saved_checkpoints/funcbound/"
-    checkpoint_dir = "checkpoints/funcbound/"
-    checkpoint = "checkpoint_best.pt"
-
-    #TODO: For some reason the scipt is checking for a dict.txt in the 
-    # checkpoints directory
-
-    # Load our model
-    roberta = RobertaModel.from_pretrained(checkpoint_dir, 
-                                        checkpoint,
-                                        'data-bin/funcbound', 
-                                        user_dir='finetune_tasks')
-    roberta.eval()
-
-    results = xda_predict_many(test_files, roberta, str(OPTIMIZATION), save_results=True)
-
-    print("Total results...")
-    print(f"TP:{results[0]}")
-    print(f"TN:{results[1]}")
-    print(f"FP:{results[2]}")
