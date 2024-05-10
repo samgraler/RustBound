@@ -236,3 +236,5 @@ def save_lief_ground_truth(bin_path: Path):
         for addr, info in func_start_addrs.items():
             f.write(f"{hex(addr)}: {info[0]}\n")
     return
+
+
