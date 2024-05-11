@@ -51,6 +51,7 @@ from ripkit.ripbin import (
     generate_minimal_labeled_features,
     AnalysisType,
     disasm_at,
+    iterable_path_shallow_callback,
 )
 
 from cli_utils import opt_lvl_callback, get_enum_type
@@ -693,116 +694,6 @@ def export_large_target_dataset(
                 shutil.copy(bin.resolve(), dest_file.resolve())
     return
 
-
-# @app.command()
-# def export_dataset(
-#     opt_lvl: Annotated[str, typer.Argument()],
-#     bit: Annotated[int, typer.Argument()],
-#     filetype: Annotated[str, typer.Argument()],
-#     output_dir: Annotated[str,
-#                           typer.Option(
-#                               help="Save the binaries to a directory")] = "",
-#     output_file: Annotated[str,
-#                            typer.Option(
-#                                help="Save the binaries paths to a file")] = "",
-#     min_text_bytes: Annotated[int, typer.Option()] = 2000,
-#     drop_dups: Annotated[bool, typer.Option()] = True,
-#     verbose: Annotated[bool, typer.Option] = False,
-# ):
-#     '''
-#     Generate a dataset of files from the ripbin database.
-#     Either copy all the binaries to a output directory 
-#     -or-
-#     Create a file containing the absolute paths to the binaries
-#     '''
-#
-#     # Opt lvl call back
-#     try:
-#         opt = opt_lvl_callback(opt_lvl)
-#     except Exception as e:
-#         print(e)
-#         return
-#     opt = opt.value.upper()
-#
-#     out_to_dir = False
-#     out_to_file = False
-#
-#     if output_dir != "":
-#         out_to_dir = True
-#
-#         out_dir = Path(output_dir)
-#
-#         if out_dir.exists():
-#             print("The output directory already exists, please remove it:!")
-#             print("Run the following command if you are sure...")
-#             print(f"rm -rf {out_dir.resolve()}")
-#             return
-#
-#     if output_file != "":
-#         out_to_file = True
-#         out_file = Path(output_file)
-#         if out_file.exists():
-#             print("The output directory already exists, please remove it:!")
-#             print("Run the following command if you are sure...")
-#             print(f"rm -rf {out_file.resolve()}")
-#             return
-#
-#     if not out_to_file and not out_to_dir:
-#         print("No output to file or directory given")
-#         return
-#
-#     # Get a dictionary of all the binaries that are in the ripbin db
-#     bins = get_all_bins()
-#
-#     if verbose:
-#         print(f"Total {len(bins[opt_lvl])} binaries with opt_lvl {opt_lvl}")
-#
-#     # Create the set of binary names that ripbin has a binary for as long
-#     # as the binary has been compiled for all optimization levels
-#     set_of_names = set([x.name for x in bins[opt]])
-#     for key in bins.keys():
-#         set_of_names = set_of_names.intersection([x.name for x in bins[key]])
-#
-#     print(f"Found {len(set_of_names)} bins that are present in all opt lvls")
-#
-#     # Get a list of pathlib objects for the binaries
-#     potential_bins = [x for x in bins[opt] if x.name in set_of_names]
-#
-#     #TODO: Binary files can have the same name if they come from different
-#     #       packages, for now I'm not allowing these to be in any dataset
-#     o0_name_set = [x.name for x in potential_bins]
-#     dup_names = []
-#     for bin in o0_name_set:
-#         if o0_name_set.count(bin) > 1:
-#             dup_names.append(bin)
-#     if dup_names != []:
-#         print(f"Dropping {len(dup_names)} binaries with matching names")
-#
-#     bins = [x for x in potential_bins if x.name not in dup_names]
-#
-#     final_binset = []
-#     for bin in track(bins, description=f"Checking {len(bins)} bin sizes..."):
-#         parsed_bin = lief.parse(str(bin.resolve()))
-#
-#         # Get the text section and the bytes themselse
-#         text_section = parsed_bin.get_section(".text")
-#         num_text_bytes = len(text_section.content)
-#         if num_text_bytes > min_text_bytes:
-#             final_binset.append(bin)
-#
-#     if out_to_file:
-#         with open(output_file, 'w') as f:
-#             f.write("\n".join(bin.resolve for bin in final_binset))
-#
-#     if out_to_dir:
-#         out_dir = Path(output_dir)
-#         out_dir.mkdir()
-#         for bin in track(bins, description=f"Copying {len(final_binset)}..."):
-#             dest_file = out_dir / bin.name
-#             shutil.copy(bin.resolve(), dest_file.resolve())
-#
-#     return
-#
 
 def get_funcs_with(files, backend):
 
@@ -2141,6 +2032,58 @@ def get_function(
     print(f"HEX REPR:\n {hex_repr}")
     return
 
+
+def modify_bin_padding(binary_path: Path, new_byte, output_path: Path):
+    # Load the binary
+    binary = lief.parse(str(binary_path.resolve()))
+
+    # Get all function starts
+    # Assuming the functions are listed in the symbol table
+    functions = [(symbol.value, symbol.value+symbol.size - 1) for symbol in binary.symbols if symbol.type == lief.ELF.SYMBOL_TYPES.FUNC and symbol.value+symbol.size!=0]
+
+    # Sort function addresses
+    functions  = sorted(functions, key=lambda x: x[0])
+
+    # Set of processed regions to avoid overwriting non-padding areas
+    processed_regions = set()
+
+    # Change padding before functions
+    for i in range(len(functions)-1):
+        end_addr = functions[i][1]
+        next_start = functions[i+1][0]
+
+        # end_addr + 1 to get to first padding
+        for addr in range(end_addr + 1 , next_start):
+            #print(addr)
+            #print(new_byte)
+            binary.patch_address(addr,new_byte)
+    print("Done patching")
+
+    # Save the modified binary
+    binary.write(str(output_path.resolve()))
+    return
+
+@app.command()
+def modify_padding(
+    dataset: Annotated[str, typer.Argument(help="Input datatset", callback= iterable_path_shallow_callback) ],
+    output_dir: Annotated[str, typer.Argument(help="output dir") ],
+    new_byte: Annotated[int, typer.Argument(help="Injected Byte") ],
+    ):
+    '''
+    Copy and modify the input dataset. Specifically, modify the padding
+    byte preceding functions
+    '''
+
+    out_path = Path(output_dir)
+    if not out_path.exists():
+        out_path.mkdir()
+
+    for bin in dataset:
+        print(bin)
+        print(bin.resolve())
+        modify_bin_padding(bin, new_byte, out_path.joinpath(bin.name))
+
+    return
 
 if __name__ == "__main__":
 
