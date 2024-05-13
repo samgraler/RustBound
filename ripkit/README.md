@@ -78,3 +78,14 @@ Container engine... I use podman because it doesn't need root
 ```
 sudo apt install podman
 ```
+
+
+## Current Tasks
+- [ ]  Generate and label ARM dataset
+    - [ ] Support building ARM files
+    - [ ] Support parsing ARM files
+- [ ]  Generate and label RISCV dataset
+    - [ ] Support building RISCV files
+    - [ ] Support parsing RISC files
+
+

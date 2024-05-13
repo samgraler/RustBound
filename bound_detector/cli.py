@@ -934,7 +934,6 @@ def rnn_predict_bounds(model, unstripped_bin, threshold: float, start: bool):
     fp = len(gnd_pred - true_addrs)
     fn = len(true_addrs - gnd_pred)
 
-    print(f"GND conf: {tp}, {fp}, {fn}")
 
     return conf, addrs
 
@@ -1813,7 +1812,6 @@ def test_on_nongpu(
         end_tp = len(set(ends) & set(end_addrs))
         end_fp = len(set(end_addrs) - set(ends))
         end_fn = len(set(ends) - set(end_addrs))
-        print(f"CUSTOM END CONF: {end_tp}, {end_fp}, {end_fn}")
 
         # 1. Add a column of all 1s for the start addrs, and a column of all 2s for the end addrs
         all_ones = np.ones((1, len(start_addrs)))

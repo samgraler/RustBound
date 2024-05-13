@@ -34,8 +34,18 @@ from typing import Optional
 import os
 from .crates_io import LocalCratesIO
 from .picky_exceptions import CrateBuildException
-from .cargo_types import RustcTarget, CargoVariables, RustcStripFlags,\
-                        RustcOptimization, Cargodb, FileType
+from .cargo_types import (
+    RustcTarget, 
+    CargoVariables, 
+    RustcStripFlags,
+    RustcOptimization, 
+    Cargodb, 
+    FileType
+)
+
+from ripkit.ripbin import (
+    CompileTimeAttacks,
+)
 
 def gen_cargo_build_cmd(proj_path: Path, target: RustcTarget, 
                         strip_cmd: Optional[RustcStripFlags] = None, 
@@ -65,7 +75,8 @@ def gen_cargo_build_cmd(proj_path: Path, target: RustcTarget,
 
 def gen_cross_build_cmd(proj_path: Path, target: RustcTarget, 
                         strip_cmd: Optional[RustcStripFlags] = None, 
-                        opt_lvl: Optional[RustcOptimization] = None):
+                        opt_lvl: Optional[RustcOptimization] = None,
+                        attack: Optional[CompileTimeAttacks] = None ):
     # First build the environment variables,
     # the CARGO_ENCODED_RUSTC_FLAGS -otherwise called- 
     #   CargoVariables.RUSTC_FLAGS 
@@ -79,6 +90,8 @@ def gen_cross_build_cmd(proj_path: Path, target: RustcTarget,
         substrs.append(f"{CargoVariables.RUSTC_FLAGS.value}='{strip_cmd.value}'")
     if opt_lvl is not None:
         substrs.append(f" {CargoVariables.DEV_PROF_SET_OPT_LEVEL.value}={opt_lvl.value}")
+    if attack is not None:
+        substrs.append(f"RUSTFLAGS='-C {attack.value}'")
 
     substrs.append(f"cd {proj_path} && cross build --target={target.value}")
 

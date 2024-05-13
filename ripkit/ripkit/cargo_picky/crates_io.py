@@ -6,6 +6,11 @@ import pandas as pd
 from typing import Union
 from enum import Enum
 
+from .picky_exceptions  import (
+    CrateCloneException,
+    CrateBuildException,
+)
+
 
 CRATES_IO_DIR = Path("~/.crates_io/").expanduser().resolve()
 CLONED_CRATES_DIR = CRATES_IO_DIR / "cloned_crates/"
@@ -168,8 +173,8 @@ def clone_crate(crate: Union[list[str], str],
                 output = subprocess.check_output(cmd,shell=True,
                                             stderr=subprocess.DEVNULL)
         except Exception as e:
-            raise Exception(f"Crate pull error {e}")
-
+            msg = f"Crate {single_crate} had exception {e}"
+            raise CrateCloneException(msg)
 
 def clone_crates(crate_names: pd.DataFrame, stop_on_fail=False, 
                  exist_ok:bool=False, dir=CLONED_CRATES_DIR)-> None:

@@ -541,7 +541,7 @@ def disassemble_text_section(file_path:Path)->list[CsInsn]:
     else:
         raise Exception(f"Unknown file type: {file_type}")
 
-def get_functions(path:Path):
+def get_functions(path:Path)->List[FunctionInfo]:
     """
         Get the functions in the passed bin file
     """

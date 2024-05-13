@@ -1,7 +1,9 @@
 from typing_extensions import Annotated
+from typing import List
 import math
 from multiprocessing  import Pool
 import multiprocessing
+from dataclasses import dataclass
 import lief
 import shutil
 import json
@@ -15,6 +17,7 @@ import subprocess
 from pathlib import Path
 import typer
 from cli_utils import opt_lvl_callback, get_enum_type
+from enum import Enum
 
 from ripkit.cargo_picky import (
     gen_cargo_build_cmd,
@@ -31,12 +34,9 @@ from ripkit.cargo_picky import (
 
 from ripkit.ripbin import (
     stash_bin,
-    save_analysis,
     calculate_md5,
     RustFileBundle,
-    generate_minimal_labeled_features,
-    AnalysisType,
-    RustcOptimization,
+    CompileTimeAttacks
 )
 from cli_utils import get_enum_type
 
@@ -94,7 +94,7 @@ def build_helper(args):
     filetype = ""
 
     # Create the file info
-    info = RustFileBundle(binary.name, binHash, target.value, filetype,
+    info = RustFileBundle(binary.name, binHash, target.value,
                           opt.value, binary.name, "", build_cmd)
 
     try:
@@ -104,6 +104,7 @@ def build_helper(args):
         print(f"Exception {e} in crate {crate}")
 
     return
+
 
 
 
@@ -138,7 +139,7 @@ def build_and_stash(
     ]
 
     if files_of_interest == []:
-        print(f"[bold yellow][BORING][/bold yellow]Crate {crate} had no executable production")
+        print(f"[bold yellow][BORING][/bold yellow] Crate {crate} had no executable production")
         # TODO: in the crates_io cache which cloned pkgs don't build any
         #       files of interest so they are not rebuilt
         return 99
@@ -162,112 +163,10 @@ def build_and_stash(
     return
 
 
-def build_analyze_crate(crate,
-                        opt,
-                        target,
-                        filetype,
-                        strip=RustcStripFlags.NOSTRIP,
-                        use_cargo=True):
-    '''
-    Helper function to build then analyze the crate
-    '''
-
-    # Build the crate
-    build_crate(crate, opt, target, strip, use_cargo=use_cargo)
-
-    # Need this to get the build command
-    crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
-
-    # Need the build command for the bundle info, this is NOT used
-    # to actually exectue a build command
-    if use_cargo:
-        build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
-    else:
-        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
-
-    # Get files of interest from the crate at the target <target>
-    files_of_interest = [
-        x for x in get_target_productions(crate, target) if is_executable(x)
-    ]
-
-    if files_of_interest == []:
-        print(f"Crate {crate} had no build executable productions")
-        # TODO: in the crates_io cache which cloned pkgs don't build any
-        #       files of interest so they are not rebuilt
-        return 99
-
-    # The only file in the list should be the binary
-    binary = files_of_interest[0]
-
-    # Create the file info
-    binHash = calculate_md5(binary)
-
-    # Create the file info
-    info = RustFileBundle(binary.name, binHash, target.value, filetype,
-                          opt.value, binary.name, "", build_cmd)
-
-    # Generate analysis
-    data = generate_minimal_labeled_features(binary)
-
-    try:
-        # Save analyiss
-        save_analysis(binary,
-                      data,
-                      AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
-                      info,
-                      overwrite_existing=False)
-    except Exception as e:
-        print(f"Exception {e} in crate {crate}")
-
-    return 0
-
-
-def get_all_target_bins(target: RustcTarget):
-    '''
-    Get all binaries by the optimization and that are of target target
-    '''
-    bin_by_opt = {
-        '0': [],
-        '1': [],
-        '2': [],
-        '3': [],
-        'z': [],
-        's': [],
-    }
-
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        info_file = parent / 'info.json'
-        info = {}
-        try:
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
-
-        # Define the binary file name
-        bin_file = parent / info['binary_name']
-        opt = info['optimization']
-        bin_target = info['target']
-
-        if opt not in bin_by_opt.keys():
-            bin_by_opt[opt] = []
-
-        if target.value in bin_target:
-            bin_by_opt[opt].append(bin_file.resolve())
-    return bin_by_opt
-
-
 def get_bins(
     target: RustcTarget,
     optimization: RustcOptimization,
-):
+)->List[Path]:
     '''
     Get all binaries of the target
     '''
@@ -275,7 +174,6 @@ def get_bins(
     bins = []
     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
         info_file = parent / 'info.json'
-        info = {}
         try:
             with open(info_file, 'r') as f:
                 info = json.load(f)
@@ -289,13 +187,9 @@ def get_bins(
             print(f"An error occurred: {e}")
             continue
 
-        # Define the binary file name
-        bin_file = parent / info['binary_name']
+        if info['optimization'] in optimization.value:
+            bins.append(parent / info['binary_name'])
 
-        opt = info['optimization']
-
-        if opt in RustcOptimization.value:
-            bins.append(bin_file)
     return bins
 
 
@@ -409,7 +303,7 @@ def build_stash_all(
     # Build and analyze each crate
     args = []
 
-    for crate in alive_it(crates_to_build):
+    for crate in crates_to_build:
         args.append((crate,opt,target_enum,overwrite_existing))
 
     with Pool(processes=num_workers) as pool:
@@ -485,7 +379,6 @@ def seq_build_all_and_stash(
     print(f"[bold red][FAILED] {len(crates_to_build)-success}")
     return
 
-
 @app.command()
 def export_dataset(
     target: Annotated[str, typer.Argument(help="Compilation Target")],
@@ -495,7 +388,7 @@ def export_dataset(
     min_text_bytes: Annotated[
         int,
         typer.Option(
-            help="Minimum number of bytes in a files .text section")] = 2000,
+            help="Minimum number of bytes in a files .text section")] = 0,
 ):
     '''
     Export a dataset from the ripkit db
@@ -506,10 +399,16 @@ def export_dataset(
         if out_dir.exists():
             print("The output directory already exists, please remove it:!")
             return
+        else:
+            out_dir.mkdir()
 
     # Get a dictionary of all the binaries that are in the ripbin db
     target_enum = get_enum_type(RustcTarget, target)
     opt_enum = get_enum_type(RustcOptimization, opt)
+
+    print(opt_enum)
+    print(target_enum)
+
     bins = get_bins(target_enum, opt_enum)
 
     # For each optimization levels and its corresponding bin list:

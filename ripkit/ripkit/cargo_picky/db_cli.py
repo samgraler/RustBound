@@ -6,6 +6,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
+import shutil
 from ripkit.cargo_picky import (
     init_crates_io,
 )
@@ -90,7 +91,9 @@ def is_crate_exe(crate: Annotated[str, typer.Argument()]):
 
 @app.command()
 def clone_many_exe(number: Annotated[int, typer.Argument()],
-                   verbose: Annotated[bool, typer.Option()] = False):
+                   stash_nonexe_name: Annotated[bool, typer.Option()] = True,
+                   verbose: Annotated[bool, typer.Option()] = False,
+                   try_nonexe: Annotated[bool, typer.Option()] = False):
     '''
     Clone many new executable rust crates.
     '''
@@ -98,15 +101,24 @@ def clone_many_exe(number: Annotated[int, typer.Argument()],
     # Get the remote crate reg
     reg = crates_io_df()
 
+    # File containing non-exe crate names
+    nonexe_names = Path("~/.crates_io/nonexe_crate_names.txt").expanduser().resolve()
+
     # List of crate current installed
     installed_crates = [
         x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
         if x.is_dir()
     ]
 
+    if not try_nonexe:
+        nonexe_files = [x for x in open(nonexe_names).readlines()]
+    else:
+        nonexe_files = []
+
     # List of crate names
     crate_names = [
-        x for x in reg['name'].tolist() if x not in installed_crates
+        x for x in reg['name'].tolist() if x not in installed_crates and
+        x not in nonexe_files
     ]
     print("Finding uninstalled registry...")
 
@@ -129,8 +141,24 @@ def clone_many_exe(number: Annotated[int, typer.Argument()],
                     bar()
                 except Exception as e:
                     print(e)
+            elif stash_nonexe_name:
+                with open("~/.crates_io/nonexe_crate_names.txt", 'a') as f:
+                    f.write(f"{crate}\n")
             if cloned_count >= number:
                 break
+
+@app.command()
+def clear_cloned():
+    '''
+    Remove all the cloned crates
+    '''
+
+    crates = list(Path(LocalCratesIO.CRATES_DIR.value).glob('*'))
+
+    print(f"Removing {len(crates)} crates")
+    for crate in alive_it(crates):
+        shutil.rmtree(crate)
+    return
 
 if __name__ == "__main__":
     banner = text2art("Ripkit-DB", "random")
