@@ -1,6 +1,26 @@
 
-# Welcome 
+# Welcome! 
 
+BoundDetector started a simple scripts to make research easier, but now has a full fledged CLI to make tasks easier! 
+
+### Research Overview
+The main idea of this reserach was to see if Neural Networks could identify 
+function boundaries in Rust Binaries. Then compare the performance to that 
+of tools like Ghidra and IDA! 
+
+
+### Cli Overview (Subject to alot of change)
+1. Automated cloning and compiling of Rust Crates
+2. Profiling of dataset based on patterns 
+3. Modification of binaries in dataset
+4. Ghidra and IDA integrations for script running
+
+Adjacent CLI's have also been made seperate from ripkit...
+1. BiRNN training and testing
+2. XDA training and testing
+
+
+### Research indepth
 Bound Detector is a comparison of 4 different tools ability to detect
 function boundaries in stripped binary files generated from Rust. 
 
@@ -22,7 +42,6 @@ rust generated binary files. Therefore the tool....
 2. Compiles the crates with user specified optimization level and arch
 3. *For this research we care about the executables* so cargo picky will also
 pull the exectuable files generated from compilation and save them 
-
 Using the tools combined means we quickly generated 1000+ different Rust binary
 files, and generated their corresponding feature vectors quickly.
 
@@ -46,46 +65,35 @@ the fly than it was to load already preprocessed data.
 Ultimately provide bindings and cli to pull analyze crates
 
 
-# Acouple dependencies 
+# Installing 
 
-Command:
-rustup
-```
+*Dependencies:*
+1. rustup
+2. cargo-clone
+3. openssl-devel
+4. pkg-config
+5. cross
+6. docker -or- podman
+
+
+```sh
+#rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-cargo
-```
+#cargo
 rustup update
-```
-
-cargo-clone
-openssl-devel
-pkg-config
-
-```
+# cargo-clone, openssl-devel, pkg-config
 sudo apt install pkg-config
 sudo apt install libssl-dev
 cargo install cargo-clone
-```
-
-The cross compiler package cross
-```
+# The cross compiler package cross
 cargo install cross --git https://github.com/cross-rs/cross
-```
-
-Container engine... I use podman because it doesn't need root
-```
+# Container engine... I use podman because it doesn't need root
 sudo apt install podman
+# See dockers website for docker
 ```
 
 
-## Current Tasks
-- [ ]  Generate and label ARM dataset
-    - [ ] Support building ARM files
-    - [ ] Support parsing ARM files
-- [ ]  Generate and label RISCV dataset
-    - [ ] Support building RISCV files
-    - [ ] Support parsing RISC files
+## Roadmap...
 
 
+- [ ] Overhaul to the database system. Current system is slow and probably would be better implemented with sqlite to support storage of modiffied binaries

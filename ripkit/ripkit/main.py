@@ -4,10 +4,8 @@ from rich import print
 from multiprocessing import Pool
 import multiprocessing
 from collections import Counter
-import matplotlib.pyplot as plt
 from art import text2art
 import numpy as np
-from enum import Enum
 
 import ghidra.cli as ghidra_cli
 import cargo_picky.db_cli as cargo_db_cli
@@ -28,13 +26,17 @@ from rich.table import Table
 from rich.progress import track
 
 import ripbin_cli
+import analyze_cli
+import evil_mod
 
 console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
-app.add_typer(ghidra_cli.app, name="ghidra")
-app.add_typer(ida_cli.app, name="ida")
-app.add_typer(cargo_db_cli.app, name="cargo")
-app.add_typer(ripbin_cli.app, name="ripbin")
+app.add_typer(ghidra_cli.app, name="ghidra", help="Ghidra related functions")
+app.add_typer(ida_cli.app, name="ida", help="IDA related functions")
+app.add_typer(cargo_db_cli.app, name="cargo", help="Pull cargo crates")
+app.add_typer(ripbin_cli.app, name="ripbin", help="Build and stash binaries into ripbin db")
+app.add_typer(analyze_cli.app, name="profile", help="Profile and analyze datasets")
+app.add_typer(evil_mod.app, name="modify", help="Modify binaries")
 
 from ripkit.cargo_picky import (
     build_crate,
@@ -58,7 +60,6 @@ from cli_utils import opt_lvl_callback, get_enum_type
 import math
 
 num_cores = multiprocessing.cpu_count()
-
 CPU_COUNT_75 = math.floor(num_cores * (3/4))
 
 @dataclass
@@ -116,8 +117,7 @@ def disasm(
                              help="Number of bytes to disassameble")],
 ):
     '''
-    A copy of object dump! Originall this was a proof of concept to 
-    ensure I could parse binaries in python
+    Copy of objdump... in python
     '''
 
     file_path = Path(file)
@@ -130,145 +130,145 @@ def disasm(
         print(line)
     return
 
-@app.command()
-def build(
-    crate: Annotated[str, typer.Argument(help="crate name")],
-    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    target: Annotated[str, typer.Argument(help="crate target")],
-    strip: Annotated[bool, typer.Option()] = False,
-    verbose: Annotated[bool, typer.Option()] = False,
-):
-    '''
-    Build a crate for a specific target
-    '''
-
-    #TODO: For simpilicity I prompt for only
-    # 64 vs 32 bit and pe vs elf. Really I
-    # should prompt for the whole target arch
-    # b/c theres many different ways to get
-    # a 64bit pe  or 32bit elf
-
-    # Opt lvl call back
-    try:
-        opt = opt_lvl_callback(opt_lvl)
-    except Exception as e:
-        print(e)
-        return
-
-    # Match the target to its enum
-    target_enum = get_enum_type(RustcTarget, target)
-    if not strip:
-        strip_lvl = RustcStripFlags.NOSTRIP
-    else:
-        # SYM_TABLE is the all the symbols
-        strip_lvl = RustcStripFlags.SYM_TABLE
-
-    if target_enum == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-        build_crate(crate,
-                    opt,
-                    target_enum,
-                    strip_lvl,
-                    use_cargo=True,
-                    debug=verbose)
-    else:
-        build_crate(crate,
-                    opt,
-                    target_enum,
-                    strip_lvl,
-                    use_cargo=False,
-                    debug=verbose)
-
-    print(f"Crate {crate} built")
-    return
-
-
-@app.command()
-def build_all(
-    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    target: Annotated[str, typer.Argument()],
-):
-    '''
-    Build all the installed crates
-    '''
-
-    #TODO: For simpilicity I prompt for only
-    # 64 vs 32 bit and pe vs elf. Really I
-    # should prompt for the whole target arch
-    # b/c theres many different ways to get
-    # a 64bit pe  or 32bit elf
-
-    # Opt lvl call back
-    try:
-        opt = opt_lvl_callback(opt_lvl)
-    except Exception as e:
-        print(e)
-        return
-
-    strip_lvl = RustcStripFlags.NOSTRIP
-
-    # List of crate current installed
-    installed_crates = [
-        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-        if x.is_dir()
-    ]
-
-    target = get_enum_type(RustcTarget, target)
-
-    for crate in alive_it(installed_crates):
-        if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-            build_crate(crate,
-                        opt,
-                        target,
-                        strip_lvl,
-                        use_cargo=True,
-                        debug=True)
-        else:
-            try:
-                build_crate(crate, opt, target, strip_lvl)
-            except Exception as e:
-                print(f"Error on {crate}")
-
-
-@app.command()
-def analyze(
-    bin_path: Annotated[str, typer.Argument()],
-    language: Annotated[str, typer.Argument()],
-    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-    save: Annotated[bool, typer.Option()] = True,
-    verbose: Annotated[bool, typer.Option()] = False,
-    overwrite_existing: Annotated[bool, typer.Option()] = False,
-):
-    '''
-    Analyze binary file 
-    '''
-
-    binary = Path(bin_path).resolve()
-    if not binary.exists():
-        print(f"Binary {binary} doesn't exist")
-        return
-
-    # Generate analysis
-    if verbose:
-        print("Generating Tensors...")
-    data = generate_minimal_labeled_features(binary)
-
-    # Create the file info
-    if verbose: print("Calculating bin hash...")
-    binHash = calculate_md5(binary)
-
-    # TODO: Anlysis not being saved with target or ELF vs PE?
-
-    # Create the file info
-    info = RustFileBundle(binary.name, binHash, "", opt_lvl,
-                          binary.name, "", "")
-
-    if verbose: print("Saving Tensor and binary")
-    # Save analyiss
-    save_analysis(binary,
-                  data,
-                  AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
-                  info,
-                  overwrite_existing=overwrite_existing)
+#@app.command()
+#def build(
+#    crate: Annotated[str, typer.Argument(help="crate name")],
+#    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
+#    target: Annotated[str, typer.Argument(help="crate target")],
+#    strip: Annotated[bool, typer.Option()] = False,
+#    verbose: Annotated[bool, typer.Option()] = False,
+#):
+#    '''
+#    Build a crate for a specific target
+#    '''
+#
+#    #TODO: For simpilicity I prompt for only
+#    # 64 vs 32 bit and pe vs elf. Really I
+#    # should prompt for the whole target arch
+#    # b/c theres many different ways to get
+#    # a 64bit pe  or 32bit elf
+#
+#    # Opt lvl call back
+#    try:
+#        opt = opt_lvl_callback(opt_lvl)
+#    except Exception as e:
+#        print(e)
+#        return
+#
+#    # Match the target to its enum
+#    target_enum = get_enum_type(RustcTarget, target)
+#    if not strip:
+#        strip_lvl = RustcStripFlags.NOSTRIP
+#    else:
+#        # SYM_TABLE is the all the symbols
+#        strip_lvl = RustcStripFlags.SYM_TABLE
+#
+#    if target_enum == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
+#        build_crate(crate,
+#                    opt,
+#                    target_enum,
+#                    strip_lvl,
+#                    use_cargo=True,
+#                    debug=verbose)
+#    else:
+#        build_crate(crate,
+#                    opt,
+#                    target_enum,
+#                    strip_lvl,
+#                    use_cargo=False,
+#                    debug=verbose)
+#
+#    print(f"Crate {crate} built")
+#    return
+#
+#
+#@app.command()
+#def build_all(
+#    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
+#    target: Annotated[str, typer.Argument()],
+#):
+#    '''
+#    Build all the installed crates
+#    '''
+#
+#    #TODO: For simpilicity I prompt for only
+#    # 64 vs 32 bit and pe vs elf. Really I
+#    # should prompt for the whole target arch
+#    # b/c theres many different ways to get
+#    # a 64bit pe  or 32bit elf
+#
+#    # Opt lvl call back
+#    try:
+#        opt = opt_lvl_callback(opt_lvl)
+#    except Exception as e:
+#        print(e)
+#        return
+#
+#    strip_lvl = RustcStripFlags.NOSTRIP
+#
+#    # List of crate current installed
+#    installed_crates = [
+#        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
+#        if x.is_dir()
+#    ]
+#
+#    target = get_enum_type(RustcTarget, target)
+#
+#    for crate in alive_it(installed_crates):
+#        if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
+#            build_crate(crate,
+#                        opt,
+#                        target,
+#                        strip_lvl,
+#                        use_cargo=True,
+#                        debug=True)
+#        else:
+#            try:
+#                build_crate(crate, opt, target, strip_lvl)
+#            except Exception as e:
+#                print(f"Error on {crate}")
+#
+#
+#@app.command()
+#def analyze(
+#    bin_path: Annotated[str, typer.Argument()],
+#    language: Annotated[str, typer.Argument()],
+#    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
+#    save: Annotated[bool, typer.Option()] = True,
+#    verbose: Annotated[bool, typer.Option()] = False,
+#    overwrite_existing: Annotated[bool, typer.Option()] = False,
+#):
+#    '''
+#    Analyze binary file 
+#    '''
+#
+#    binary = Path(bin_path).resolve()
+#    if not binary.exists():
+#        print(f"Binary {binary} doesn't exist")
+#        return
+#
+#    # Generate analysis
+#    if verbose:
+#        print("Generating Tensors...")
+#    data = generate_minimal_labeled_features(binary)
+#
+#    # Create the file info
+#    if verbose: print("Calculating bin hash...")
+#    binHash = calculate_md5(binary)
+#
+#    # TODO: Anlysis not being saved with target or ELF vs PE?
+#
+#    # Create the file info
+#    info = RustFileBundle(binary.name, binHash, "", opt_lvl,
+#                          binary.name, "", "")
+#
+#    if verbose: print("Saving Tensor and binary")
+#    # Save analyiss
+#    save_analysis(binary,
+#                  data,
+#                  AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
+#                  info,
+#                  overwrite_existing=overwrite_existing)
 
 
 def lief_num_funcs(path: Path):
@@ -799,8 +799,11 @@ def count_diff(
         typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")],
     backend2: Annotated[str, typer.Argument()],
 ):
+    '''
+    See the difference between different approaches to ground
+    truth
+    '''
 
-    # TODO: Very bad func structure right now
 
     if backend == "lief":
         tot_funcs, txt_funcs = get_funcs_with(inp, 'lief')
@@ -1050,129 +1053,129 @@ def count_diff(
 #     return
 #
 
-@app.command()
-def build_analyze_all(
-    opt_lvl: Annotated[str, typer.Argument()],
-    #bit: Annotated[int, typer.Argument()],
-    filetype: Annotated[str, typer.Argument()],
-    target: Annotated[str, typer.Argument(help="crate target")],
-    stop_on_fail: Annotated[bool, typer.Option()] = False,
-    force_build_all: Annotated[bool, typer.Option()] = False,
-    build_arm: Annotated[bool, typer.Option()] = False,
-):
-    '''
-    Build and analyze pkgs
-    '''
-
-    # Opt lvl call back
-    try:
-        opt = opt_lvl_callback(opt_lvl)
-    except Exception as e:
-        print(e)
-        return
-
-    target_enum = get_enum_type(RustcTarget, target)
-
-    # List of crate current installed that can be built
-    crates_to_build = [
-        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-        if x.is_dir()
-    ]
-
-    # If we don't have to build all the crates, find the crates that
-    # are already built with the specified optimization and arch
-    # an dremovet that from the list of installed crates
-    if not force_build_all:
-
-        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-            info_file = parent / 'info.json'
-            info = {}
-            try:
-                with open(info_file, 'r') as f:
-                    info = json.load(f)
-            except FileNotFoundError:
-                print(f"File not found: {info_file}")
-                continue
-            except json.JSONDecodeError as e:
-                print(f"JSON decoding error: {e}")
-                continue
-            except Exception as e:
-                print(f"An error occurred: {e}")
-                continue
-
-            if info['optimization'].upper() in opt_lvl and \
-                info['target'].upper() in target_enum.value.upper():
-                # Remove this file from the installed crates list
-                if (x := info['binary_name']) in crates_to_build:
-                    crates_to_build.remove(x)
-
-    # Any crates that are already built with the same target don't rebuild or analyze
-
-    # Need to get all the analysis for the given optimization and target...
-    crates_with_no_interest = Path(
-        f"~/.crates_io/uninteresting_crates_cache_{target_enum.value}"
-    ).expanduser()
-
-    boring_crates = []
-    # If the file doesn't exist throw in the empty list
-    if not crates_with_no_interest.exists():
-        crates_with_no_interest.touch()
-        with open(crates_with_no_interest, 'w') as f:
-            json.dump({'names': boring_crates}, f)
-
-    # Add to the boring crates that aren't being built if we are
-    # not forcing the build of all crates
-    if not force_build_all:
-        # If the file does exist read it, ex
-        with open(crates_with_no_interest, 'r') as f:
-            boring_crates.extend(json.load(f)['names'])
-
-    # Dont build any crate that have been found to have no executable
-    crates_to_build = [x for x in crates_to_build if x not in boring_crates]
-
-    #for x in boring_crates:
-    #    if x in crates_to_build:
-    #        crates_to_build.remove(x)
-
-    success = 0
-
-    # Build and analyze each crate
-    for crate in alive_it(crates_to_build):
-        #TODO: the following conditional is here because when building for
-        #       x86_64 linux I know that cargo will work, and I know
-        #       cargo's toolchain version
-        res = 0
-        if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-            try:
-                res = build_analyze_crate(crate,
-                                          opt,
-                                          target_enum,
-                                          filetype,
-                                          RustcStripFlags.NOSTRIP,
-                                          use_cargo=True)
-            except CrateBuildException:
-                print(f"Failed to build crate {crate}")
-        else:
-            try:
-                res = build_analyze_crate(crate,
-                                          opt,
-                                          target_enum,
-                                          filetype,
-                                          RustcStripFlags.NOSTRIP,
-                                          use_cargo=False)
-            except CrateBuildException:
-                print(f"Failed to build crate {crate}")
-                continue
-        if res == 99:
-            boring_crates.append(crate)
-            print(f"Success build but adding {crate} to boring crates")
-            with open(crates_with_no_interest, 'w') as f:
-                json.dump({'names': boring_crates}, f)
-        else:
-            success += 1
-            print(f"[SUCCESS] crate {crate}")
-
-    print(f"Total build success: {success}")
+#@app.command()
+#def build_analyze_all(
+#    opt_lvl: Annotated[str, typer.Argument()],
+#    #bit: Annotated[int, typer.Argument()],
+#    filetype: Annotated[str, typer.Argument()],
+#    target: Annotated[str, typer.Argument(help="crate target")],
+#    stop_on_fail: Annotated[bool, typer.Option()] = False,
+#    force_build_all: Annotated[bool, typer.Option()] = False,
+#    build_arm: Annotated[bool, typer.Option()] = False,
+#):
+#    '''
+#    Build and analyze pkgs
+#    '''
+#
+#    # Opt lvl call back
+#    try:
+#        opt = opt_lvl_callback(opt_lvl)
+#    except Exception as e:
+#        print(e)
+#        return
+#
+#    target_enum = get_enum_type(RustcTarget, target)
+#
+#    # List of crate current installed that can be built
+#    crates_to_build = [
+#        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
+#        if x.is_dir()
+#    ]
+#
+#    # If we don't have to build all the crates, find the crates that
+#    # are already built with the specified optimization and arch
+#    # an dremovet that from the list of installed crates
+#    if not force_build_all:
+#
+#        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#            info_file = parent / 'info.json'
+#            info = {}
+#            try:
+#                with open(info_file, 'r') as f:
+#                    info = json.load(f)
+#            except FileNotFoundError:
+#                print(f"File not found: {info_file}")
+#                continue
+#            except json.JSONDecodeError as e:
+#                print(f"JSON decoding error: {e}")
+#                continue
+#            except Exception as e:
+#                print(f"An error occurred: {e}")
+#                continue
+#
+#            if info['optimization'].upper() in opt_lvl and \
+#                info['target'].upper() in target_enum.value.upper():
+#                # Remove this file from the installed crates list
+#                if (x := info['binary_name']) in crates_to_build:
+#                    crates_to_build.remove(x)
+#
+#    # Any crates that are already built with the same target don't rebuild or analyze
+#
+#    # Need to get all the analysis for the given optimization and target...
+#    crates_with_no_interest = Path(
+#        f"~/.crates_io/uninteresting_crates_cache_{target_enum.value}"
+#    ).expanduser()
+#
+#    boring_crates = []
+#    # If the file doesn't exist throw in the empty list
+#    if not crates_with_no_interest.exists():
+#        crates_with_no_interest.touch()
+#        with open(crates_with_no_interest, 'w') as f:
+#            json.dump({'names': boring_crates}, f)
+#
+#    # Add to the boring crates that aren't being built if we are
+#    # not forcing the build of all crates
+#    if not force_build_all:
+#        # If the file does exist read it, ex
+#        with open(crates_with_no_interest, 'r') as f:
+#            boring_crates.extend(json.load(f)['names'])
+#
+#    # Dont build any crate that have been found to have no executable
+#    crates_to_build = [x for x in crates_to_build if x not in boring_crates]
+#
+#    #for x in boring_crates:
+#    #    if x in crates_to_build:
+#    #        crates_to_build.remove(x)
+#
+#    success = 0
+#
+#    # Build and analyze each crate
+#    for crate in alive_it(crates_to_build):
+#        #TODO: the following conditional is here because when building for
+#        #       x86_64 linux I know that cargo will work, and I know
+#        #       cargo's toolchain version
+#        res = 0
+#        if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
+#            try:
+#                res = build_analyze_crate(crate,
+#                                          opt,
+#                                          target_enum,
+#                                          filetype,
+#                                          RustcStripFlags.NOSTRIP,
+#                                          use_cargo=True)
+#            except CrateBuildException:
+#                print(f"Failed to build crate {crate}")
+#        else:
+#            try:
+#                res = build_analyze_crate(crate,
+#                                          opt,
+#                                          target_enum,
+#                                          filetype,
+#                                          RustcStripFlags.NOSTRIP,
+#                                          use_cargo=False)
+#            except CrateBuildException:
+#                print(f"Failed to build crate {crate}")
+#                continue
+#        if res == 99:
+#            boring_crates.append(crate)
+#            print(f"Success build but adding {crate} to boring crates")
+#            with open(crates_with_no_interest, 'w') as f:
+#                json.dump({'names': boring_crates}, f)
+#        else:
+#            success += 1
+#            print(f"[SUCCESS] crate {crate}")
+#
+#    print(f"Total build success: {success}")
 
 
 def get_text_functions(bin_path: Path):
@@ -1270,923 +1273,6 @@ def DatasetStats(
         text_bytes = text_section.content
         stats.text_section_size += len(text_bytes)
     print(stats)
-    return
-
-
-def byte_search(dataset, input_seq, count_only=False):
-    '''
-    Search the dataset for the byte sting. 
-    '''
-
-    if Path(dataset).is_dir():
-        # Get the files
-        files = list(Path(dataset).glob('*'))
-    elif Path(dataset).is_file():
-        files = [Path(dataset)]
-    else:
-        return [], []
-
-    # Save the occruacnes here
-    prologue_occurances = []
-    non_pro_occurances = []
-
-    length = len(input_seq.split(" "))
-
-    prog_occurs = 1
-    non_prog_occurs = 0
-
-    #for file in alive_it(files):
-    for file in files:
-        # get the start addrs
-        func_start_addrs = {
-            x.addr: (x.name, x.size)
-            for x in get_functions(file)
-        }
-
-        bin = lief.parse(str(file.resolve()))
-        text_section = bin.get_section(".text")
-
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        base_address = bin.imagebase
-
-        # This enumerate the .text byte and sees which ones are functions
-        for i, _ in enumerate(text_bytes):
-            address = base_address + text_section.virtual_address + i
-
-            if i + length > len(text_bytes) + 1:
-                break
-
-            sub_seq = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
-
-            if sub_seq == input_seq:
-                if address in func_start_addrs.keys():
-                    if count_only:
-                        prog_occurs += 1
-                    else:
-                        prologue_occurances.append((address, file))
-                else:
-                    if count_only:
-                        non_prog_occurs += 1
-                    else:
-                        non_pro_occurances.append((address, file))
-    if count_only:
-        return prog_occurs, non_prog_occurs
-    else:
-        return prologue_occurances, non_pro_occurances
-
-
-@app.command()
-def search_for_bytes(
-    dataset: Annotated[str, typer.Argument(help="The dataset")],
-    input_seq: Annotated[str,
-                         typer.Argument(
-                             help="Bytes in format: 0x<byte1> 0x<byte2> ")],
-    save_to_files: Annotated[bool, typer.Option()] = False,
-):
-    '''
-    Search the dataset for the byte sting. 
-    '''
-
-    if Path(dataset).is_dir():
-        # Get the files
-        files = list(Path(dataset).glob('*'))
-    elif Path(dataset).is_file():
-        files = [Path(dataset)]
-    else:
-        return
-
-    # Save the occruacnes here
-    prologue_occurances = []
-    non_pro_occurances = []
-
-    length = len(input_seq.split(" "))
-
-    for file in alive_it(files):
-
-        # get the start addrs
-        func_start_addrs = {
-            x.addr: (x.name, x.size)
-            for x in get_functions(file)
-        }
-
-        bin = lief.parse(str(file.resolve()))
-        text_section = bin.get_section(".text")
-
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        base_address = bin.imagebase
-
-        # This enumerate the .text byte and sees which ones are functions
-        for i, _ in enumerate(text_bytes):
-            address = base_address + text_section.virtual_address + i
-
-            if i + length > len(text_bytes) + 1:
-                break
-
-            sub_seq = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
-
-            if sub_seq == input_seq:
-                if address in func_start_addrs.keys():
-                    prologue_occurances.append((address, file))
-                else:
-                    non_pro_occurances.append((address, file))
-
-    #print("Done searching")
-
-    #with open("NON_PRO_OCCURNACE", 'w') as f:
-    #    for (addr, file) in non_pro_occurances:
-    #        f.write(f"{file} ||||| {hex(addr)}\n")
-
-    print(f"Total {len(prologue_occurances) + len(non_pro_occurances)}")
-    if len(prologue_occurances) > 0:
-        print(
-            f"Prologue {len(prologue_occurances)} | First occurance {hex(prologue_occurances[0][0])} file: {prologue_occurances[0][1]}"
-        )
-    if len(non_pro_occurances) > 0:
-        print(
-            f"NonPrologue {len(non_pro_occurances)} | First occurance {hex(non_pro_occurances[0][0])}  file: {non_pro_occurances[0][1]}"
-        )
-
-    if save_to_files:
-        with open("_PROLOGUES", 'w') as f:
-            for (addr, file) in prologue_occurances:
-                f.write(f"{file}, {hex(addr)}\n")
-
-        with open("NON_PROLOGUES", 'w') as f:
-            for (addr, file) in non_pro_occurances:
-                f.write(f"{file}, {hex(addr)}\n")
-    return
-
-
-@dataclass
-class file_addr:
-    name: str
-    addr: int
-
-
-@dataclass
-class prologue:
-    key: str
-    files_and_addrs: List[file_addr]
-
-
-def profile_worker(dataset_and_sequence):
-
-    dataset = dataset_and_sequence[0]
-    sequence = dataset_and_sequence[1]
-
-    prog_occurs, non_prog_occurs = byte_search(dataset,
-                                               sequence,
-                                               count_only=True)
-    return sequence, prog_occurs, non_prog_occurs
-
-@app.command()
-def profile_epilogues(
-    dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the epilogue")],
-    savefile: Annotated[str, typer.Argument(help="File to save to")],
-    workers: Annotated[int, typer.Argument(help="Number of workers")] = CPU_COUNT_75,
-):
-    '''
-    Profile the dataset for it's epilogues. Get info about epilogue frequencey,
-    whether or not the epilogues occur in other places that are not epilogues.
-    '''
-
-    savepath = Path(savefile)
-    if savepath.exists():
-        print(f"Path {savepath} already exists")
-        return
-    progs = {}
-    files = list(Path(dataset).glob('*'))
-    for file in alive_it(files):
-
-        # Get the functions
-        functions = get_functions(file)
-        bin = lief.parse(str(file.resolve()))
-        text_section = bin.get_section(".text")
-        text_bytes = text_section.content
-
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        base_address = bin.imagebase
-        func_start_addrs = {x.addr: (x.name, x.size) for x in functions}
-
-        # This enumerate the .text byte and sees which ones are functions
-        for i, _ in enumerate(text_bytes):
-            address = base_address + text_section.virtual_address + i
-            if address in func_start_addrs.keys():
-
-                base_index = i + func_start_addrs[address][1] - length
-
-                epilogue = " ".join(
-                    str(hex(x)) for x in text_bytes[base_index:i + length])
-                epilogue = epilogue.strip()
-                if epilogue in progs.keys():
-                    progs[epilogue].append((file, address))
-                else:
-                    progs[epilogue] = [(file, address)]
-
-    prog_counter = {}
-    chunks = []
-
-    for epilogue in progs.keys():
-        chunks.append((dataset, epilogue))
-
-    with Pool(processes=workers) as pool:
-        results = pool.map(profile_worker, chunks)
-
-    for (seq, pro, nonpro) in alive_it(results):
-        if seq in prog_counter.keys():
-            prog_counter[seq][0] += pro
-            prog_counter[seq][1] += nonpro
-        else:
-            prog_counter[seq] = [0, 0]
-            prog_counter[seq][0] += pro
-            prog_counter[seq][1] += nonpro
-
-    print(f"Total number of epilogues: {len(progs.keys())}")
-
-
-    start_counter = SequenceCounter(0,0,0,0,0,0)
-
-    # Iterate over each sequence, looking it the number of occurance in epilogue,
-    # and non-epilogue
-    start_counter.sequences = len(prog_counter.keys())
-    for seq, (pro_count, nonpro_count) in prog_counter.items():
-
-        if pro_count == 1:
-            start_counter.found_once_in_start+=1
-
-        if nonpro_count == 0:
-            start_counter.found_only_in_start+=1
-        else:
-            start_counter.found_in_nonstart+=1
-
-        start_counter.nonstart_occurances+=nonpro_count
-        start_counter.start_occurances+=pro_count
-
-    print(f"Number of epilogues that occur else where: {start_counter.found_in_nonstart}")
-    print(f"Number of epilogues that didnot occur else where: {start_counter.found_only_in_start}")
-    print(f"Number of epilogues that are unique: {start_counter.found_once_in_start}")
-
-    prog_counter['dataset'] = dataset
-    prog_counter['seq_len'] = length
-    prog_counter['counts'] = asdict(start_counter)
-
-    with open(savepath, 'w') as f:
-        json.dump(prog_counter, f)
-    return
-
-
-@app.command()
-def profile_prologues(
-    dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the prologue")],
-    savefile: Annotated[str, typer.Argument(help="File to save to")],
-    workers: Annotated[int, typer.Argument(help="Number of workers")] = CPU_COUNT_75,
-):
-    '''
-    Profile the dataset for it's prologues. Get info about prologue frequencey,
-    whether or not the prologues occur in other places that are not prologues.
-    '''
-
-    savepath = Path(savefile)
-    if savepath.exists():
-        print(f"Path {savepath} already exists")
-        return
-
-    progs = {}
-    files = list(Path(dataset).glob('*'))
-    for file in alive_it(files):
-
-        # Get the functions
-        functions = get_functions(file)
-        bin = lief.parse(str(file.resolve()))
-        text_section = bin.get_section(".text")
-        text_bytes = text_section.content
-
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        base_address = bin.imagebase
-        func_start_addrs = {x.addr: (x.name, x.size) for x in functions}
-
-        # This enumerate the .text byte and sees which ones are functions
-        for i, _ in enumerate(text_bytes):
-            address = base_address + text_section.virtual_address + i
-            if address in func_start_addrs.keys():
-
-                prologue = " ".join(
-                    str(hex(x)) for x in text_bytes[i:i + length])
-                prologue = prologue.strip()
-                if prologue in progs.keys():
-                    progs[prologue].append((file, address))
-                else:
-                    progs[prologue] = [(file, address)]
-
-    prog_counter = {}
-    chunks = []
-
-    for prologue in progs.keys():
-        chunks.append((dataset, prologue))
-
-    with Pool(processes=workers) as pool:
-        results = pool.map(profile_worker, chunks)
-
-    for (seq, pro, nonpro) in alive_it(results):
-        if seq in prog_counter.keys():
-            prog_counter[seq][0] += pro
-            prog_counter[seq][1] += nonpro
-        else:
-            prog_counter[seq] = [0, 0]
-            prog_counter[seq][0] += pro
-            prog_counter[seq][1] += nonpro
-
-    print(f"Total number of prologues: {len(progs.keys())}")
-
-
-    start_counter = SequenceCounter(0,0,0,0,0,0)
-
-    # Iterate over each sequence, looking it the number of occurance in prologue,
-    # and non-prologue
-    start_counter.sequences = len(prog_counter.keys())
-    for seq, (pro_count, nonpro_count) in prog_counter.items():
-
-        if pro_count == 1:
-            start_counter.found_once_in_start+=1
-
-        if nonpro_count == 0:
-            start_counter.found_only_in_start+=1
-        else:
-            start_counter.found_in_nonstart+=1
-
-        start_counter.nonstart_occurances+=nonpro_count
-        start_counter.start_occurances+=pro_count
-
-    print(f"Number of prologues that occur else where: {start_counter.found_in_nonstart}")
-    print(f"Number of prologues that didnot occur else where: {start_counter.found_only_in_start}")
-    print(f"Number of prologues that are unique: {start_counter.found_once_in_start}")
-
-    prog_counter['dataset'] = dataset
-    prog_counter['seq_len'] = length
-    prog_counter['counts'] = asdict(start_counter)
-
-    with open(savepath, 'w') as f:
-        json.dump(prog_counter, f)
-    return
-
-
-@app.command()
-def top_epilogues(
-    dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the prologue")],
-    examples: Annotated[int,
-                        typer.Argument(help="Num of head and tail prologues")],
-):
-    '''
-    Find Common prologues
-    '''
-
-    if Path(dataset).is_dir():
-        files = list(Path(dataset).glob('*'))
-    elif Path(dataset).is_file():
-        files = [Path(dataset)]
-    else:
-        return
-
-    prologues = {}
-
-    # Save the adresses where a prologue occurs
-    addrs = {}
-    file_names = {}
-
-    # Save the disasm
-    disams = {}
-
-    for file in alive_it(files):
-
-        # Get the functions
-        functions = get_functions(file)
-
-        # Add to the prologues dict the prologues
-
-        bin = lief.parse(str(file.resolve()))
-
-        text_section = bin.get_section(".text")
-        text_bytes = text_section.content
-
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        base_address = bin.imagebase
-
-        func_start_addrs = {x.addr: (x.name, x.size) for x in functions}
-        func_end_addrs = {
-            x.addr + x.size: (x.name, x.size, x.addr)
-            for x in functions
-        }
-
-        # Want to count the number of times a prolog accors and in what file
-        # and address it occurs in
-
-        # This enumerate the .text byte and sees which ones are functions
-        for i, _ in enumerate(text_bytes):
-
-            # The end address need to be the last byte
-            address = base_address + text_section.virtual_address + i
-            #if address in func_start_addrs.keys():
-            if address + length in func_end_addrs.keys():
-                key = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
-                key = key.strip()
-                if key in prologues.keys():
-                    prologues[key] += 1
-                    #addrs[key].append((address,file))
-                    addrs[key].append(address)
-                    file_names[key].append(
-                        (file.name, address,
-                         func_end_addrs[address + length][2],
-                         address + length))
-                else:
-                    prologues[key] = 1
-                    #addrs[key] = [(address,file)]
-                    addrs[key] = [(address)]
-                    file_names[key] = [((file.name, address,
-                                         func_end_addrs[address + length][2],
-                                         address + length))]
-
-                # BUG: This was not working, I was unable to correctly diasm
-                # Want to get the disasmable of a key
-                #disams[key] = disasm_at(file, address, length)
-                #disams[key] = disasm_with(file, address, length, file_disasm)
-
-    most_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=True))
-    print(f"Max occurances: {max(prologues.values())}")
-
-    count = 0
-    for key, value in most_common.items():
-        print(file_names[key][0][0])
-        print(hex(file_names[key][0][1]))
-        print(
-            f"Count {value} | key: {key} | example at {file_names[key][0][0]}:0x{hex(file_names[key][0][1])}"
-        )
-
-        # TODO: The following was to print the assmebly for the prologue
-        # to the screen, but... has been difficult, and doesn't make
-        # sense for shorter prologues (however in the same breath, shorter
-        # prologues don't make much sense unless they make atleast a whole
-        # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
-
-        ## See the below for how the bytes_string is created, this does that
-        ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
-
-        ## Format each byte in the res nicely
-        #for thing in res:
-        #    byte_ar = thing.bytes
-        #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
-        #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
-
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
-        # Turn the key into the disasm
-
-        #print(f"Disam: {disams[key]}")
-        count += 1
-        if count > examples:
-            print(f"Total unique funcs {len(prologues.values())}")
-            print(f"Total functions {sum(prologues.values())}")
-            break
-
-    least_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=False))
-    # Least common
-    print("Least common prologues...")
-    count = 0
-    for key, value in least_common.items():
-        print(
-            f"Count {value} | key: {key} | example at {file_names[key][0][0]}:{hex(file_names[key][0][1])}, Start at:{hex(file_names[key][0][2])}, End at {hex(file_names[key][0][3])} "
-        )
-
-        # TODO: The following was to print the assmebly for the prologue
-        # to the screen, but... has been difficult, and doesn't make
-        # sense for shorter prologues (however in the same breath, shorter
-        # prologues don't make much sense unless they make atleast a whole
-        # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
-
-        ## See the below for how the bytes_string is created, this does that
-        ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
-
-        ## Format each byte in the res nicely
-        #for thing in res:
-        #    byte_ar = thing.bytes
-        #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
-        #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
-
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
-        # Turn the key into the disasm
-
-        #print(f"Disam: {disams[key]}")
-        count += 1
-        if count > examples:
-            print(f"Total unique funcs {len(prologues.values())}")
-            print(f"Total functions {sum(prologues.values())}")
-            return
-    return
-
-
-#TODO: Parallelize this. Also get the disasm working
-@app.command()
-def top_prologues(
-    dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the prologue")],
-    examples: Annotated[int,
-                        typer.Argument(help="Num of head and tail prologues")],
-):
-    '''
-    Find Common prologues
-    '''
-
-    if Path(dataset).is_dir():
-        files = list(Path(dataset).glob('*'))
-    elif Path(dataset).is_file():
-        files = [Path(dataset)]
-    else:
-        return
-
-    prologues = {}
-
-    # Save the adresses where a prologue occurs
-    addrs = {}
-    file_names = {}
-
-    # Save the disasm
-    disams = {}
-
-    for file in alive_it(files):
-
-        # Get the functions
-        functions = get_functions(file)
-
-        # Add to the prologues dict the prologues
-
-        bin = lief.parse(str(file.resolve()))
-
-        text_section = bin.get_section(".text")
-        text_bytes = text_section.content
-
-        # Get the bytes in the .text section
-        text_bytes = text_section.content
-
-        # Get the base address of the loaded binary
-        base_address = bin.imagebase
-
-        func_start_addrs = {x.addr: (x.name, x.size) for x in functions}
-
-        # Want to count the number of times a prolog accors and in what file
-        # and address it occurs in
-
-        # This enumerate the .text byte and sees which ones are functions
-        for i, _ in enumerate(text_bytes):
-            address = base_address + text_section.virtual_address + i
-            if address in func_start_addrs.keys():
-                key = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
-                key = key.strip()
-                if key in prologues.keys():
-                    prologues[key] += 1
-                    #addrs[key].append((address,file))
-                    addrs[key].append(address)
-                    file_names[key].append((file.name, address))
-                else:
-                    prologues[key] = 1
-                    #addrs[key] = [(address,file)]
-                    addrs[key] = [(address)]
-                    file_names[key] = [(file.name, address)]
-
-                # BUG: This was not working, I was unable to correctly diasm
-                # Want to get the disasmable of a key
-                #disams[key] = disasm_at(file, address, length)
-                #disams[key] = disasm_with(file, address, length, file_disasm)
-
-    most_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=True))
-    print(f"Max occurances: {max(prologues.values())}")
-
-    count = 0
-    for key, value in most_common.items():
-        print(file_names[key][0][0])
-        print(hex(file_names[key][0][1]))
-        print(
-            f"Count {value} | key: {key} | example at {file_names[key][0][0]}:0x{hex(file_names[key][0][1])}"
-        )
-
-        # TODO: The following was to print the assmebly for the prologue
-        # to the screen, but... has been difficult, and doesn't make
-        # sense for shorter prologues (however in the same breath, shorter
-        # prologues don't make much sense unless they make atleast a whole
-        # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
-
-        ## See the below for how the bytes_string is created, this does that
-        ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
-
-        ## Format each byte in the res nicely
-        #for thing in res:
-        #    byte_ar = thing.bytes
-        #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
-        #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
-
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
-        # Turn the key into the disasm
-
-        #print(f"Disam: {disams[key]}")
-        count += 1
-        if count > examples:
-            print(f"Total unique funcs {len(prologues.values())}")
-            print(f"Total functions {sum(prologues.values())}")
-            break
-
-    least_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=False))
-    # Least common
-    print("Least common prologues...")
-    count = 0
-    for key, value in least_common.items():
-        print(
-            f"Count {value} | key: {key} | example at {file_names[key][0][0]}:0x{hex(file_names[key][0][1])}"
-        )
-
-        # TODO: The following was to print the assmebly for the prologue
-        # to the screen, but... has been difficult, and doesn't make
-        # sense for shorter prologues (however in the same breath, shorter
-        # prologues don't make much sense unless they make atleast a whole
-        # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
-
-        ## See the below for how the bytes_string is created, this does that
-        ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
-
-        ## Format each byte in the res nicely
-        #for thing in res:
-        #    byte_ar = thing.bytes
-        #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
-        #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
-
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
-        # Turn the key into the disasm
-
-        #print(f"Disam: {disams[key]}")
-        count += 1
-        if count > examples:
-            print(f"Total unique funcs {len(prologues.values())}")
-            print(f"Total functions {sum(prologues.values())}")
-            return
-    return
-
-
-@app.command()
-def get_function_list(binary: Annotated[str,
-                                        typer.Argument(help="Binary File")], ):
-    '''
-    Get list of functions
-    '''
-
-    bin = Path(binary)
-
-    # Get the functions
-    functions = get_functions(bin)
-
-    for i, func in enumerate(functions):
-        print(f"{i}: {func.name} : {func.addr}")
-    return
-
-
-@app.command()
-def get_function(
-    binary: Annotated[str, typer.Argument(help="Binary File")],
-    name_like: Annotated[str,
-                         typer.Option(help="Substring of function name")] = "",
-    name_exact: Annotated[str,
-                          typer.Option(help="The exact function name")] = "",
-):
-    '''
-    Get information on the given function in the binary 
-    '''
-
-    exact = False
-    like = False
-    if name_like == "" and name_exact == "":
-        print("Need a function name")
-        return
-    elif name_like != "":
-        name = name_like
-        like = True
-    else:
-        name = name_exact
-        exact = True
-
-    bin = Path(binary)
-
-    # Get the functions
-    functions = get_functions(bin)
-
-    # Add to the prologues dict the prologues
-    bin = lief.parse(str(bin.resolve()))
-
-    text_section = bin.get_section(".text")
-    text_bytes = text_section.content
-
-    # Get the bytes in the .text section
-    text_bytes = text_section.content
-
-    # Get the base address of the loaded binary
-    base_address = bin.imagebase
-
-    func_info = ()
-    for func in functions:
-        if func.name == name and exact:
-            func_info = (func.addr, func.name, func.size)
-        elif name in func.name and like:
-            func_info = (func.addr, func.name, func.size)
-
-    if func_info == ():
-        print(f"Function {name} not found in {binary}")
-        return
-
-    print("Lief info:")
-    print(f"Raw address: {func_info[0]}")
-    print(f"Length: {func_info[2]}")
-
-    # Need to apply the offset to get the correct addr:
-    # correct addr = cur_byte_index + base_image_addr + text_sec_addr
-    offset = base_address + text_section.virtual_address
-    blist = text_bytes[func_info[0] - offset:func_info[0] - offset +
-                       func_info[2]]
-
-    hex_repr = " ".join(str(hex(x)) for x in blist)
-    print(f"HEX REPR:\n {hex_repr}")
-    return
-
-
-def modify_bin_padding(binary_path: Path, byte_str, output_path: Path, follow: List[int], verbose):
-    # Load the binary
-    binary = lief.parse(str(binary_path.resolve()))
-
-    my_functions = get_functions(binary_path)
-
-    # Get all function starts
-    # Assuming the functions are listed in the symbol table
-    functions = [(symbol.value, symbol.value+symbol.size - 1, symbol) for symbol in binary.symbols if symbol.type == lief.ELF.SYMBOL_TYPES.FUNC and symbol.value+symbol.size!=0]
-
-    # Sort function addresses
-    functions  = sorted(functions, key=lambda x: x[0])
-
-    # Change padding before functions
-    for i in range(10, len(functions)-10):
-        if functions[i][0] not in [x.addr for x in my_functions]:
-            print("dis agree")
-
-        end_addr = functions[i][1]
-        next_start = functions[i+1][0]
-
-        patchable = [x for x in range(end_addr+1, next_start)]
-
-        if len(patchable) < len(byte_str) or len(patchable) % len(byte_str) != 0:
-            continue
-
-        if (val:=binary.get_content_from_virtual_address(end_addr,1).tolist()[0] ) not in follow and follow != []:
-            #print(f"Skipping val {val} :: {follow}")
-            continue
-        elif verbose:
-            print(f"Patch on {[hex(x) for x in patchable]}")
-
-        # end_addr + 1 to get to first padding
-        for addr in range(end_addr + 1, next_start,len(byte_str)):
-            binary.patch_address(addr, [int(0x66), int(0x90)])
-
-    # Save the modified binary
-    binary.write(str(output_path.resolve()))
-    return
-
-def big_brain_modify_padding(bin:Path, out:Path): #, new_byte:int):
-    '''
-    Moddify padding byte doing some more sophiscated changes 
-    than liefs .patchaddres.
-
-    Steps:
-    1. Copy the text section contents
-    2. Iterate over bytes and add nops to end of functions
-    3. Re-write binary with new contents
-
-    '''
-    # Load the binary
-    binary = lief.parse(str(bin.resolve()))
-    
-    # Find the .text section
-    text_section = binary.get_section(".text")
-    if text_section is None:
-        print("No .text section found!")
-        return
-    
-    # Retrieve the original .text section content
-    original_text_content = bytearray(text_section.content)
-    
-    # Calculate the base address of the .text section for offset calculations
-    text_base = text_section.virtual_address
-    
-    # Create a new bytearray for the modified content
-    modified_text_content = bytearray()
-    
-    # Initialize last function end offset
-    last_end_offset = 0
-    
-    # Process each symbol (function) in the section
-    for symbol in sorted(binary.symbols, key=lambda x: x.value):
-        if symbol.type == lief.ELF.SYMBOL_TYPES.FUNC: 
-            func_address = symbol.value
-            func_size = symbol.size
-            
-            # Start offset of this function in the .text section
-            start_offset = func_address - text_base
-            end_offset = start_offset + func_size
-            
-            # Append the content up to this function
-            modified_text_content += original_text_content[last_end_offset:start_offset]
-            
-            # Append the function itself
-            modified_text_content += original_text_content[start_offset:end_offset]
-            
-            # Append 4 NOPs
-            modified_text_content += b'\x90\x90\x90\x90'
-            
-            # Update last_end_offset
-            last_end_offset = end_offset
-    
-    # Append any remaining content after the last function
-    modified_text_content += original_text_content[last_end_offset:]
-    
-    # Update the .text section with modified content
-    text_section.content = modified_text_content
-    text_section.size = len(modified_text_content)
-    
-    # Update virtual size if necessary (e.g., for PE files)
-    if hasattr(text_section, "virtual_size"):
-        text_section.virtual_size = len(modified_text_content)
-    
-    # Rebuild the binary
-    builder = lief.ELF.Builder(binary)
-    #builder.build_sections()
-    builder.build()
-    builder.write(str(out.resolve()))
-
-    return
-
-@app.command()
-def modify_padding(
-    dataset: Annotated[str, typer.Argument(help="Input datatset", callback= iterable_path_shallow_callback) ],
-    output_dir: Annotated[str, typer.Argument(help="output dir") ],
-    bytestring: Annotated[str, typer.Argument(help="Injected Byte, write in hex seperated by comma 90,90 ") ],
-    must_follow: Annotated[str, typer.Option(help="Last byte of function must be, hex seperated by comma") ] = "",
-    verbose: Annotated[bool, typer.Option()] = False,
-    ):
-    '''
-    Copy and modify the input dataset. Specifically, modify the padding
-    byte preceding functions
-    '''
-
-    out_path = Path(output_dir)
-    if not out_path.exists():
-        out_path.mkdir()
-
-    byte_str = [int(x,16) for x in bytestring.split(",")]
-
-    if must_follow == "":
-        follow = []
-    else:
-        follow = [int(x,16) for x in must_follow.split(',')]
-
-    for bin in alive_it(dataset):
-        #print(bin)
-        #print(bin.resolve())
-        modify_bin_padding(bin, byte_str, out_path.joinpath(bin.name),follow, verbose)
-        #big_brain_modify_padding(bin, out_path.joinpath(bin.name))
     return
 
 if __name__ == "__main__":
