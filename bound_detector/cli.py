@@ -1806,6 +1806,8 @@ def test_on_nongpu(
         gnd_matrix = np.concatenate(
             (gnd_truth.func_addrs.T.reshape(-1, 1), ends.T.reshape(-1, 1)),
             axis=1)
+        print(len(gnd_truth.func_addrs))
+        print(gnd_matrix.shape)
 
         # Manually calc end comp to confirm that this matches the end_conf returned 
         # from the function
@@ -1863,8 +1865,8 @@ def test_on_nongpu(
         bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
         tot_bound_conf.tp += bound_conf.tp
-        tot_bound_conf.fp = birnn_bounds.shape[0] - bound_conf.tp
-        tot_bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
+        tot_bound_conf.fp += birnn_bounds.shape[0] - bound_conf.tp
+        tot_bound_conf.fn += gnd_matrix.shape[0] - bound_conf.tp
 
         tot_start_conf.tp += start_conf.tp
         tot_start_conf.tn += start_conf.tn
