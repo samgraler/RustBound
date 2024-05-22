@@ -1,4 +1,4 @@
-# Bound Detector !! 
+# RustBound !! 
 
 Analysis of current methods of Function Boundary Detection in Stripped Binary Files on executable files generated from Rust source code
 
