@@ -148,7 +148,7 @@ def big_brain_modify_padding(bin:Path, out:Path): #, new_byte:int):
     return
 
 @app.command()
-def modify_padding(
+def edit_padding(
     dataset: Annotated[str, typer.Argument(help="Input datatset", callback= iterable_path_shallow_callback) ],
     output_dir: Annotated[str, typer.Argument(help="output dir") ],
     bytestring: Annotated[str, typer.Argument(help="Injected Byte, write in hex seperated by comma 90,90 ") ],
