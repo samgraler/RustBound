@@ -8,40 +8,16 @@ The main components of this repository are:
 3. ghidra_bench: tool for benchmarking ghidra
 
 
+# Ripkit... 
 
+*Ripkit* can:
+1. Clone rust crates and compile them for various targets
+2. Save produced Rust binaries in db 
+3. Export rust datasets 
+4. Profile such datasets
+5. Use Ghidra, or IDA to analyze function boundary detection in datasets
 
-# Ripkit dependencies 
-
-Command:
-rustup
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-cargo
-```
-rustup update
-```
-
-cargo-clone
-openssl-devel
-pkg-config
-
-```
-sudo apt install pkg-config
-sudo apt install libssl-dev
-cargo install cargo-clone
-```
-
-The cross compiler package cross
-```
-cargo install cross --git https://github.com/cross-rs/cross
-```
-
-Container engine... I use podman because it doesn't need root
-```
-sudo apt install podman
-```
+See the README.md file in the `ripkit` directory for ripkit installation and setup. 
 
 
 # Training BiRNN...
