@@ -760,6 +760,34 @@ def test_bounds(
     return
 
 
+def parse_for_bounds(inp):
+    '''
+    Parse the output from the ghidra headless analyzer to get the found 
+    function names and addresses
+    '''
+
+    in_list = False
+    names = []
+    addrs = []
+    lengths = []
+    for line in inp.split("\n"):
+        if "END FUNCTION LIST" in line:
+            break
+        if in_list:
+            if "RIPKIT_FOUND_FUNC" in line:
+                line = line.split('<RIPKIT_SEP>')
+                line = [x.strip() for x in line]
+                names.append(line[1])
+                addrs.append(int(line[2],16))
+                lengths.append(line[3])
+        if "BEGIN FUNCTION LIST" in line:
+            in_list = True
+
+    found_funcs = FoundFunctions(addresses = np.array(addrs), names=names, lengths=np.array(lengths))
+    return found_funcs
+
+
+
 
 if __name__ == "__main__":
     app()
