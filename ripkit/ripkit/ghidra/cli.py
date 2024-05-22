@@ -660,38 +660,38 @@ def create_dual_plots(bar_value1, bar_value2, bar_value3, pie_found, pie_total, 
 #    return
 
 
-@app.command()
-def count_inbetween(
-    binary: Annotated[str, typer.Argument()],
-    addr1: Annotated[str, typer.Argument()],
-    addr2: Annotated[str, typer.Argument()],
-    ):
-
-    f_path =  Path(f".ghidra_bench/{binary}.json")
-    if not f_path.exists():
-        print(f"No log for {binary}")
-        return
-
-    with open(f_path, 'r') as f:
-        res = json.load(f)
-    res = list(res.values())[0]
-
-
-
-    # True Positive
-    strip_total_func = res[1][0]
-
-    total_funcs = [ x for x in strip_total_func if 
-        hex(int(x[1],16)) > hex(int(addr1,16)) and 
-        hex(int(x[1],16)) < hex(int(addr2,16))]
-
-    # Total functions is true_pos + false_neg
-    print(f"True Pos + False Neg of result (total funcs): {len(strip_total_func)}")
-    print(f"In between : {len(total_funcs)}")
-    print(f"Start {hex(int(addr1,16))}")
-    print(f"End {hex(int(addr2,16))}")
-
-    return
+#@app.command()
+#def count_inbetween(
+#    binary: Annotated[str, typer.Argument()],
+#    addr1: Annotated[str, typer.Argument()],
+#    addr2: Annotated[str, typer.Argument()],
+#    ):
+#
+#    f_path =  Path(f".ghidra_bench/{binary}.json")
+#    if not f_path.exists():
+#        print(f"No log for {binary}")
+#        return
+#
+#    with open(f_path, 'r') as f:
+#        res = json.load(f)
+#    res = list(res.values())[0]
+#
+#
+#
+#    # True Positive
+#    strip_total_func = res[1][0]
+#
+#    total_funcs = [ x for x in strip_total_func if 
+#        hex(int(x[1],16)) > hex(int(addr1,16)) and 
+#        hex(int(x[1],16)) < hex(int(addr2,16))]
+#
+#    # Total functions is true_pos + false_neg
+#    print(f"True Pos + False Neg of result (total funcs): {len(strip_total_func)}")
+#    print(f"In between : {len(total_funcs)}")
+#    print(f"Start {hex(int(addr1,16))}")
+#    print(f"End {hex(int(addr2,16))}")
+#
+#    return
 
 @app.command()
 def install_ghidra():
@@ -722,6 +722,43 @@ def install_ghidra():
     script_file = install_script.parent / "List_Function_and_Entry.py"
     shutil.copy2(script_file, scripts)
     return
+
+
+@app.command()
+def test_bounds(
+        binary_dir: Annotated[str, typer.Argument()],
+        output_dir: Annotated[str,typer.Argument()],
+        #noanalysis: Annotated[bool, typer.Option()]=False,
+        strip_file: Annotated[bool,typer.Option()]=False,
+        use_offset: Annotated[bool, typer.Option()]=True,
+    ):
+
+    # Create the pathlib objects 
+    binary_dir_path = Path(binary_dir)
+    save_path = Path(output_dir)
+
+    # Make the save directory
+    if not save_path.exists():
+        save_path.mkdir()
+
+    # Iteravte oover the binaries and run the test
+    for bin in alive_it(list(binary_dir_path.glob('*'))):
+        # Make sure the bin is a file
+        if not bin.is_file():
+            continue
+
+        # Make the flags list 
+        flags = []
+        #if noanalysis:
+        #    flags = ["-noanalysis"]
+        #else:
+        #    flags = []
+
+        func_len_array, runtime = get_ghid_bounds(bin, flags, use_offset, strip_file)
+        result_path = save_path.joinpath(f"{bin.name}")
+        save_raw_experiment(bin, runtime, func_len_array, result_path)
+    return
+
 
 
 if __name__ == "__main__":
