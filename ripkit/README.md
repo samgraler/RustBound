@@ -149,6 +149,18 @@ poetry shell
 poetry install
 ```
 
+# Usage 
+
+Since the dependencies were installed in a virtual environemnt managed by poetry, before using tthe Ripkit tool, it is necessary to cd into the project directory (RustBound/ripkit) and run the command `poetry shell` to start the virtual environment.
+
+When you are finished using the tools, the nested shell created by poetry can be exited using the `exit` command
+
+Ripkit commands can be run as follows: `python ripkit/main.py [command] [arguments]`
+
+For a list of commands, use `python ripkit/main.py --help`
+
+Additionally, individual commands will also accept the --help flag for usage information
+
 ## Roadmap...
 
 
