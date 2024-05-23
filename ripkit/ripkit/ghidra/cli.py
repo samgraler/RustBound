@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import typer
 import math
 import os
@@ -434,6 +434,7 @@ def read_results(
                 )],
     workers: Annotated[int, typer.Option()] = 24,
     verbose: Annotated[bool, typer.Option()] = False,
+    save_to_tex: Annotated[Path, typer.Option()] = Path(""),
     ):
     '''
     Read the results from the input dir
@@ -495,6 +496,37 @@ def read_results(
         total_bound_conf.tp+= bound_conf.tp
         total_bound_conf.fp+= bound_conf.fp
         total_bound_conf.fn+= bound_conf.fn
+
+    if save_to_tex != Path(""):
+        with open(save_to_tex,'w') as f:
+            # Save to the file.
+            # start: 
+            # end: 
+            # bounds: tp tn fp fn
+            f.write("CONFUSION MATRIX:\n\n")
+            cols = f" & ".join(k for k, _ in asdict(total_start_conf).items())
+            f.write(cols+' \\\\ \n')
+            print(asdict(total_start_conf))
+            start_line = " & ".join(str(val) for k, val in asdict(total_start_conf).items())
+            f.write(start_line+' \\\\ \n')
+            ends_line = " & ".join(str(val) for k, val in asdict(total_end_conf).items())
+            f.write(ends_line+' \\\\ \n')
+            bounds_line = " & ".join(str(val) for k, val in asdict(total_bound_conf).items())
+            f.write(bounds_line+' \\\\ \n')
+
+            f.write("METRICS:\n")
+            start_res = calc_metrics(total_start_conf)
+            cols = f" & ".join(k for k, _ in asdict(start_res).items())
+            f.write(cols+' \\\\ \n')
+            start_res_line = f" & ".join(str(val) for _, val in asdict(start_res).items())
+            f.write(start_res_line+' \\\\ \n')
+            end_res = calc_metrics(total_end_conf)
+            end_res_line = f" & ".join(str(val) for k, val in asdict(end_res).items())
+            f.write(end_res_line+' \\\\ \n')
+            bound_res = calc_metrics(total_bound_conf)
+            bound_res_line = f" & ".join(str(val) for k, val in asdict(bound_res).items())
+            f.write(bound_res_line+' \\\\ \n')
+
 
     print(f"Total Metrics")
     print(f"Starts: {total_start_conf}")
