@@ -60,14 +60,11 @@ experiment with different feature vectors. However, it becomes obsolete once
 the feature vector is selected. In some cases it was faster to pre-process on 
 the fly than it was to load already preprocessed data. 
 
-
-
 Ultimately provide bindings and cli to pull analyze crates
-
 
 # Installation
 
-The following installation steps detail the process of installing all dependencies necessary to use Ripkit on a fresh Ubuntu VM.
+The following installation steps detail the process of installing all dependencies necessary to use Ripkit on a fresh Ubuntu VM. Ripkit is currently only supported on linux.
 
 This tutorial assumes that the `RustBound` repository has been cloned to the VM. If this in not the case, see the steps below:
 
@@ -155,11 +152,11 @@ Ghidra is an open source reverse engineering framework, and one of the tools use
 
 An installation script is provided, and should be run using the following command (from the RustBound/ripkit directory): `python ripkit/main.py ghidra install-ghidra`
 
-Internet connection is required to download and install the necessary dependencies, and this script may take several minutes to complete.
+Internet connection is required to download and install the necessary dependencies, and this script may take a minute to complete.
 
 ## IDA
 
-IDA+
+IDA Pro is a professional reverse engineering framework that requires a license to use. Because of this fact, there is currently no installation process established, and the IDA Pro paths are hard coded in ripkit. In the future, we plan to write a script that installs a free version of IDA if it exists.
 
 # Usage 
 
