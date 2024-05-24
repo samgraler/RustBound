@@ -11,7 +11,7 @@ from fairseq.models.roberta import RobertaModel
 import torch
 import lief 
 from elftools.elf.elffile import ELFFile
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from colorama import Fore, Back, Style
 import numpy as np
 from alive_progress import alive_it
@@ -955,41 +955,15 @@ def raw_test(
         if matrix_saved.exists():
             raise Exception("MAtix has been saved")
         
-        #cur_results = []
-        #for i in range(10000):
-        #    step, runtime = next(res_generator)
-        #    cur_results.append(step)
-
-        #total_res = [x[0] for x in list(res_generator)]
-
-        # Save the first numpy chunk
-        #np.savez(matrix_saved, np.array([x[0] for x in list(res_generator)]))
         np.savez(matrix_saved, tot_res)
         # For every 10,000 bytes saze it into its own array 
         print("saved")
-
-        #TODO: This was an attempt to fix the processing crashing for too many arrays
-
-        #runtime = 0 
-        ##for (data, cur_runtime) in res_generator:
-        #chunks_per_numpy_array = 1000
-        #current_sub_chunk = []
-        #array_indexing = 0
-        #total_numpy_arrays = []
-        #for chunk in iter(lambda: list(itertools.islice((x[0] for x in res_generator), 512)), []):
-        #    #safe_nump_save(data, matrix_saved)
-        #    current_sub_chunk.append(chunk)
-        #    if len(current_sub_chunk) == chunks_per_numpy_array:
-        #        total_numpy_array.append(numpy.array(current_sub_chunk))
-
 
 
         # Save the runtime
         runtime_file = sub_dir.joinpath("runtime.txt")
         with open(runtime_file, 'w') as f:
             f.write(f"{runtime}")
-
-        #save_raw_experiment_three_prob( bin_path, runtime, res, single_res_path)
     return
 
 def safe_nump_save(data: np.ndarray, npz_file: Path):
@@ -1008,23 +982,24 @@ def safe_nump_save(data: np.ndarray, npz_file: Path):
 
 @app.command()
 def read_bounds_raw(
-    input_dir : Annotated[str,typer.Argument()],
-    bin_dir: Annotated[str, typer.Argument()],
+    input_path: Annotated[Path,typer.Argument()],
+    bin_path: Annotated[Path, typer.Argument()],
     verbose: Annotated[bool, typer.Option()] = False,
     supress_warn: Annotated[bool, typer.Option()] = False,
+    out_dir: Annotated[str, typer.Option()] = "",
+    tex_charts: Annotated[Path, typer.Option()] = Path(""),
     ):
     '''
     Read the input dir and compute results using the lief module
     '''
 
-    input_path = Path(input_dir)
+
     if not input_path.exists(): 
-        print(f"Inp dir {input_dir} is not a dir")
+        print(f"Inp dir {input_path} is not a dir")
         return
 
-    bin_path = Path(bin_dir)
     if not bin_path.exists():
-        print(f"Bin dir {bin_dir} is not a dir")
+        print(f"Bin dir {bin_path} is not a dir")
         return
 
     if bin_path.is_file():
@@ -1145,11 +1120,9 @@ def read_bounds_raw(
 
         # 1. Add a column of all 1s for the start addrs, and a column of all 2s for the end addrs
         all_ones = np.ones((1,len(xda_starts)))
-        #tmp_starts = np.vstack((xda_starts, np.ones((1,len(xda_starts))))).T
         tmp_starts = np.vstack((xda_starts, all_ones)).T
 
         all_twos = np.full((1,len(xda_ends)),2)
-        #tmp_ends = np.vstack((xda_ends, np.full((1,len(xda_ends)),2))).T
         tmp_ends = np.vstack((xda_ends, all_twos)).T
 
         # 2. Vertically stack the start and end columns and sort by adddress
@@ -1181,7 +1154,7 @@ def read_bounds_raw(
             # Check to see if theres no rows,
             # This would be the case is the first 
             # prediction is an end and there is only 1 prediction
-            if filt_sorted_bounds.shape[0] == 0:
+            if filt_sorted_bounds.shape[0] == 0 or filt_sorted_bounds.shape[1] == 0:
                 xda_bounds = np.array([[]])
             else:
                 # Check to see if the first index is an end prediction, if so remove it 
@@ -1189,13 +1162,26 @@ def read_bounds_raw(
                     filt_sorted_bounds = filt_sorted_bounds[1:,:]
 
                 # Check to see if the last prediction is a start, if so remove it
-                if filt_sorted_bounds[-1,1] == 1:
+
+                # See if theres any remaining predictions
+                #print(filt_sorted_bounds.shape)
+                if filt_sorted_bounds.shape[0] == 0 or filt_sorted_bounds.shape[1] == 0:
+                    xda_bounds = np.array([[]])
+                elif filt_sorted_bounds[-1,1] == 1:
                     filt_sorted_bounds = filt_sorted_bounds[:-1,:]
 
                 # Lastly, combine the start and ends array to make matrix:   | start | end |
-                starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
-                ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
-                xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
+                    starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
+                    ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
+                    xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
+
+
+                else:
+
+                # Lastly, combine the start and ends array to make matrix:   | start | end |
+                    starts = filt_sorted_bounds[filt_sorted_bounds[:,1] == 1]
+                    ends = filt_sorted_bounds[filt_sorted_bounds[:,1] == 2]
+                    xda_bounds = np.hstack(( starts[:,0].reshape(-1,1), ends[:,0].reshape(-1,1)))
 
         #dot = np.dot(gnd_matrix[, xda_bounds)
         #norm_gnd = np.dot(gnd_matrix,gnd_matrix)
@@ -1217,8 +1203,12 @@ def read_bounds_raw(
         # FP = Total number of functions in pred - tp
         # FN = Total number of functions in ground - tp
         for row in xda_bounds:
+            if xda_bounds.shape[0] == 0 or xda_bounds.shape[1] !=2:
+                break
+            #print(xda_bounds.shape)
             if np.any(np.all(row == gnd_matrix, axis=1)): 
                 bound_conf.tp+=1
+
         bound_conf.fp = xda_bounds.shape[0] - bound_conf.tp
         bound_conf.fn = gnd_matrix.shape[0] - bound_conf.tp
 
@@ -1265,12 +1255,48 @@ def read_bounds_raw(
             print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
 
 
+    if out_dir != "":
+        out_path = Path(out_dir)
+        with open(out_path, 'w') as f:
+            json.dump(f, {'start' : asdict(total_start_conf),
+                      'end':     asdict(total_end_conf),
+                      'bound':   asdict(total_bound_conf),
+                       })
+
     print(f"Starts Conf: {total_start_conf}")
     print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
     print(f"Ends Conf: {total_end_conf}")
     print(f"Ends Metrics: {calc_metrics(total_end_conf)}")
-    print(f"Bounds Conf: {total_start_conf}")
+    print(f"Bounds Conf: {total_bound_conf}")
     print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
+
+    if tex_charts != Path(""):
+        with open(tex_charts, 'w') as f:
+            # end: 
+            # bounds: tp tn fp fn
+            f.write("CONFUSION MATRIX:\n\n")
+            cols = f" & ".join(k for k, _ in asdict(total_start_conf).items())
+            f.write(cols+' \\\\ \n')
+            start_line = " & ".join(str(val) for k, val in asdict(total_start_conf).items())
+            f.write(start_line+' \\\\ \n')
+            ends_line = " & ".join(str(val) for k, val in asdict(total_end_conf).items())
+            f.write(ends_line+' \\\\ \n')
+            bounds_line = " & ".join(str(val) for k, val in asdict(total_bound_conf).items())
+            f.write(bounds_line+' \\\\ \n')
+
+            f.write("METRICS:\n")
+            start_res = calc_metrics(total_start_conf)
+            cols = f" & ".join(k for k, _ in asdict(start_res).items())
+            f.write(cols+' \\\\ \n')
+            start_res_line = f" & ".join(str(val) for _, val in asdict(start_res).items())
+            f.write(start_res_line+' \\\\ \n')
+            end_res = calc_metrics(total_end_conf)
+            end_res_line = f" & ".join(str(val) for k, val in asdict(end_res).items())
+            f.write(end_res_line+' \\\\ \n')
+            bound_res = calc_metrics(total_bound_conf)
+            bound_res_line = f" & ".join(str(val) for k, val in asdict(bound_res).items())
+            f.write(bound_res_line+' \\\\ \n')
+
     return 
 
 
