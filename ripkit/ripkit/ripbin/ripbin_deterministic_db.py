@@ -34,12 +34,25 @@ import json
 # to make gathering binaries faster, but then I have to
 # worry about keeping the two insync
 
-from .ripbin_exceptions import RipbinRegistryError, RipbinAnalysisError, RipbinDbError, AnalysisExistsError
-from .analyzer_types import Compiler, RustcOptimization, ProgLang, FileType, GoOptimization, AnalysisType, Coptimization
+from .ripbin_exceptions import (
+    RipbinRegistryError,
+    RipbinAnalysisError,
+    RipbinDbError,
+    AnalysisExistsError,
+)
+from .analyzer_types import (
+    Compiler,
+    RustcOptimization,
+    ProgLang,
+    FileType,
+    GoOptimization,
+    AnalysisType,
+    Coptimization,
+)
 from .binary_analyzer import get_functions
 
 DB_PATH = Path("~/.ripbin/").expanduser().resolve()
-RIPBIN_BINS = DB_PATH.joinpath('ripped_bins')
+RIPBIN_BINS = DB_PATH.joinpath("ripped_bins")
 
 
 @dataclass
@@ -62,11 +75,11 @@ class RustBundleMetaData:
 
 
 def init() -> None:
-    '''
+    """
     Init the ripbin db
 
     Default path is '~/.ripbin/'
-    '''
+    """
 
     # Guard for case where db exists
     if DB_PATH.exists():
@@ -76,7 +89,7 @@ def init() -> None:
     DB_PATH.mkdir()
 
     # Make the ripped bins path
-    ripped_bins_store = DB_PATH.joinpath('ripped_bins')
+    ripped_bins_store = DB_PATH.joinpath("ripped_bins")
     ripped_bins_store.mkdir()
 
     # Now I have
@@ -89,16 +102,16 @@ def init() -> None:
 
 
 def calculate_md5(file_path, buffer_size=8192):
-    '''
-    Get the hash of a file. This is helpful for storing binaries of the same 
-    names that were compiled with different flags / for different OSs 
-    '''
+    """
+    Get the hash of a file. This is helpful for storing binaries of the same
+    names that were compiled with different flags / for different OSs
+    """
 
     md5_hash = hashlib.md5()
 
     # Open, read, and take hash of file iterating over the buffers until
     # there's no more
-    with open(file_path, 'rb') as file:
+    with open(file_path, "rb") as file:
         buffer = file.read(buffer_size)
         while buffer:
             md5_hash.update(buffer)
@@ -108,27 +121,27 @@ def calculate_md5(file_path, buffer_size=8192):
     return md5_hash.hexdigest()
 
 
-def stash_bin(bin_path: Path,
-              file_info: RustFileBundle,
-              overwrite_existing: bool = False):
+def stash_bin(
+    bin_path: Path, file_info: RustFileBundle, overwrite_existing: bool = False
+):
 
     # Calc the hash for the file
     binHash = calculate_md5(bin_path)
 
     # See if the hash is present in any other pkg directory name
-    common_binary_hash = [
-        x for x in RIPBIN_BINS.iterdir() if binHash in x.name
+    common_binary_hash = [x for x in RIPBIN_BINS.iterdir() if binHash in x.name]
+
+    matches = [
+        x for x in common_binary_hash if f"opt_{file_info.optimization}" in x.name
     ]
 
-
-    matches = [x for x in common_binary_hash if f"opt_{file_info.optimization}" in x.name]
-
-    #if common_analysis.empty:
+    # if common_analysis.empty:
     if common_binary_hash == []:
         pkg_path = RIPBIN_BINS.joinpath(f"{bin_path.name}_{str(binHash)}")
     else:
-        pkg_path = RIPBIN_BINS.joinpath(f"{bin_path.name}_{str(binHash)}_opt_{file_info.optimization}")
-
+        pkg_path = RIPBIN_BINS.joinpath(
+            f"{bin_path.name}_{str(binHash)}_opt_{file_info.optimization}"
+        )
 
     if matches != []:
         if not overwrite_existing:
@@ -153,30 +166,30 @@ def stash_bin(bin_path: Path,
     return
 
 
-def save_analysis(bin_path: Path,
-                  analysis_data: Union[pd.DataFrame, np.ndarray,
-                                       Generator[np.ndarray, None,
-                                                 None], Path],
-                  analysis_type: AnalysisType,
-                  file_info: RustFileBundle,
-                  save_bin: bool = True,
-                  overwrite_existing: bool = True):
+def save_analysis(
+    bin_path: Path,
+    analysis_data: Union[
+        pd.DataFrame, np.ndarray, Generator[np.ndarray, None, None], Path
+    ],
+    analysis_type: AnalysisType,
+    file_info: RustFileBundle,
+    save_bin: bool = True,
+    overwrite_existing: bool = True,
+):
 
     # Calc the hash for the file
     binHash = calculate_md5(bin_path)
 
     # See if the hash is present in any other pkg directory name
-    common_binary_hash = [
-        x for x in RIPBIN_BINS.iterdir() if binHash in x.name
-    ]
+    common_binary_hash = [x for x in RIPBIN_BINS.iterdir() if binHash in x.name]
 
-    #if common_analysis.empty:
+    # if common_analysis.empty:
     pkg_path = RIPBIN_BINS.joinpath(f"{bin_path.name}_{str(binHash)}")
 
     if common_binary_hash != []:
         if not overwrite_existing:
-            #print("Existing analysis, without overwrite_existing")
-            #print(f"Common binary hashes: {common_binary_hash}")
+            # print("Existing analysis, without overwrite_existing")
+            # print(f"Common binary hashes: {common_binary_hash}")
             raise Exception
     else:
         # Need to make a pkg_dir for this binary
@@ -214,10 +227,11 @@ def save_analysis(bin_path: Path,
         shutil.copy(bin_path, bin_file)
     return
 
+
 def save_lief_ground_truth(bin_path: Path):
-    '''
+    """
     Save a file in the db of the lief ground truth
-    '''
+    """
 
     if not bin_path.exists():
         raise Exception()
@@ -232,9 +246,7 @@ def save_lief_ground_truth(bin_path: Path):
 
     func_start_addrs = {x.addr: (x.name, x.size) for x in functions}
 
-    with open(func_list_path, 'w') as f:
+    with open(func_list_path, "w") as f:
         for addr, info in func_start_addrs.items():
             f.write(f"{hex(addr)}: {info[0]}\n")
     return
-
-

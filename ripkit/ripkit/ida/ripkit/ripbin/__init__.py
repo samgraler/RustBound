@@ -1,17 +1,14 @@
-# Need to import binary_analyzer.py 
+# Need to import binary_analyzer.py
 # analyzer_types
 
-#import analyzer_types
-#import binary_analyzer
+# import analyzer_types
+# import binary_analyzer
 
-#from .ripbin_db import (.to(x.device)
-#)
+# from .ripbin_db import (.to(x.device)
+# )
 
 
-from ..bin_types import (
-    RegBit,
-    FileFormat
-)
+from ..bin_types import RegBit, FileFormat
 
 from .binary_analyzer import (
     generate_minimal_labeled_features,
@@ -28,10 +25,10 @@ from .ripbin_deterministic_db import (
     save_lief_ground_truth,
 )
 
-#from .ripbin_db import (
+# from .ripbin_db import (
 #    get_registry,
 #    save_and_register_analysis,
-#)
+# )
 
 from .analyzer_types import (
     AnalysisType,

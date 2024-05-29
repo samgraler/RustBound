@@ -1,8 +1,10 @@
 """
 Enums and dataclasses for cargo_automation files
 """
+
 from enum import Enum
 from pathlib import Path
+
 
 class Cargodb(Enum):
     REG_DIR = Path("~/.cargo_reg/").expanduser()
@@ -12,7 +14,8 @@ class Cargodb(Enum):
 
 
 class FileType(Enum):
-    ''' File type enums '''
+    """File type enums"""
+
     # @TODO: Add MACH-0 support
     # @TODO: NOTICE: lief has its own file types but doesn't differenciate
     #         64bit and 32bit
@@ -30,16 +33,18 @@ class RustcOptimization(Enum):
     OS = "s"
     OZ = "z"
 
+
 class RustcStripFlags(Enum):
-    """ 
-    This is a flag meant to be passed to 
+    """
+    This is a flag meant to be passed to
     CargoVariables.RUSTC_FLAGS
     """
-    # NOTICE: Only one flag can be passed to 
+
+    # NOTICE: Only one flag can be passed to
     # CARGO_ENCODED_RUSTFLAGS...
-    # They remove the RUSTFLAGS environment variable 
+    # They remove the RUSTFLAGS environment variable
     # in favor of this one that encodes the flags...
-    # however I could not find a way to change multiple 
+    # however I could not find a way to change multiple
     # flags together
     NOSTRIP = "-Cstrip=none"
     DEBUG_INFO = "-Cstrip=debug"
@@ -47,13 +52,13 @@ class RustcStripFlags(Enum):
 
 
 class CargoVariables(Enum):
-    ''' 
+    """
     These are the means to provided the build flags, via env vars
-    '''
+    """
+
     RUSTC_FLAGS = "CARGO_ENCODED_RUSTFLAGS"
     DEV_PROF_SET_OPT_LEVEL = "CARGO_PROFILE_DEV_OPT_LEVEL"
     RELEASE_PROF_SET_OPT_LEVEL = "CARGO_PROFILE_RELEASE_OPT_LEVEL"
-
 
 
 class RustcTarget(Enum):

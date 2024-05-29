@@ -34,7 +34,9 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 app.add_typer(ghidra_cli.app, name="ghidra", help="Ghidra related functions")
 app.add_typer(ida_cli.app, name="ida", help="IDA related functions")
 app.add_typer(cargo_db_cli.app, name="cargo", help="Pull cargo crates")
-app.add_typer(ripbin_cli.app, name="ripbin", help="Build and stash binaries into ripbin db")
+app.add_typer(
+    ripbin_cli.app, name="ripbin", help="Build and stash binaries into ripbin db"
+)
 app.add_typer(analyze_cli.app, name="profile", help="Profile and analyze datasets")
 app.add_typer(evil_mod.app, name="modify", help="Modify binaries")
 
@@ -60,31 +62,36 @@ from cli_utils import opt_lvl_callback, get_enum_type
 import math
 
 num_cores = multiprocessing.cpu_count()
-CPU_COUNT_75 = math.floor(num_cores * (3/4))
+CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
+
 
 @dataclass
-class arch_stats():
-    '''
+class arch_stats:
+    """
     Architecture Specifics stats when profiling dataset
-    '''
+    """
+
     files: int
     size: int
     funcs: int
 
+
 @dataclass
-class FoundFunctions():
-    '''
+class FoundFunctions:
+    """
     Helper Object to make explict found functions
-    '''
+    """
+
     addresses: np.ndarray
     names: List[str]
 
 
 @dataclass
 class DatasetStat:
-    '''
+    """
     Helper Object for gathering dataset stats
-    '''
+    """
+
     files: int
     file_size: int
     stripped_size: int
@@ -93,32 +100,31 @@ class DatasetStat:
     text_section_functions: int
     alias_count: int
 
+
 @dataclass
 class SequenceCounter:
-    '''
+    """
     Helper Object to count occurances of sequences in the dataset
-    '''
+    """
+
     sequences: int
-    found_in_nonstart: int 
-    found_only_in_start: int 
+    found_in_nonstart: int
+    found_only_in_start: int
     found_once_in_start: int
 
-    nonstart_occurances:int
-    start_occurances:int
+    nonstart_occurances: int
+    start_occurances: int
 
 
 @app.command()
 def disasm(
     file: Annotated[str, typer.Argument(help="Input file")],
-    addr: Annotated[str,
-                    typer.Argument(help="Address to start at in hex")],
-    num_bytes: Annotated[int,
-                         typer.Argument(
-                             help="Number of bytes to disassameble")],
+    addr: Annotated[str, typer.Argument(help="Address to start at in hex")],
+    num_bytes: Annotated[int, typer.Argument(help="Number of bytes to disassameble")],
 ):
-    '''
+    """
     Copy of objdump... in python
-    '''
+    """
 
     file_path = Path(file)
 
@@ -130,14 +136,15 @@ def disasm(
         print(line)
     return
 
-#@app.command()
-#def build(
+
+# @app.command()
+# def build(
 #    crate: Annotated[str, typer.Argument(help="crate name")],
 #    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
 #    target: Annotated[str, typer.Argument(help="crate target")],
 #    strip: Annotated[bool, typer.Option()] = False,
 #    verbose: Annotated[bool, typer.Option()] = False,
-#):
+# ):
 #    '''
 #    Build a crate for a specific target
 #    '''
@@ -182,11 +189,11 @@ def disasm(
 #    return
 #
 #
-#@app.command()
-#def build_all(
+# @app.command()
+# def build_all(
 #    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
 #    target: Annotated[str, typer.Argument()],
-#):
+# ):
 #    '''
 #    Build all the installed crates
 #    '''
@@ -229,17 +236,17 @@ def disasm(
 #                print(f"Error on {crate}")
 #
 #
-#@app.command()
-#def analyze(
+# @app.command()
+# def analyze(
 #    bin_path: Annotated[str, typer.Argument()],
 #    language: Annotated[str, typer.Argument()],
 #    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
 #    save: Annotated[bool, typer.Option()] = True,
 #    verbose: Annotated[bool, typer.Option()] = False,
 #    overwrite_existing: Annotated[bool, typer.Option()] = False,
-#):
+# ):
 #    '''
-#    Analyze binary file 
+#    Analyze binary file
 #    '''
 #
 #    binary = Path(bin_path).resolve()
@@ -288,28 +295,30 @@ def lief_num_funcs(path: Path):
     func_start_addrs = {
         x.addr: (x.name, x.size)
         for x in functions
-        if x.addr > base_address + text_section.virtual_address and
-        x.addr < base_address + text_section.virtual_address + len(text_bytes)
+        if x.addr > base_address + text_section.virtual_address
+        and x.addr < base_address + text_section.virtual_address + len(text_bytes)
     }
 
     return len(func_start_addrs.keys())
 
+
 def stat_worker(bin_info):
-    '''
+    """
     Worker to retrieve stats from ripbin
-    '''
+    """
     bin_file = bin_info[0]
     info = bin_info[1]
 
     return info, bin_file.stat().st_size, lief_num_funcs(bin_file)
 
+
 @app.command()
 def stats(
     workers: Annotated[int, typer.Option(help="Number of workers")] = CPU_COUNT_75,
-    ):
-    '''
+):
+    """
     Print statistics about the ripped binaries in the ripbin database
-    '''
+    """
     ripbin_dir = Path("~/.ripbin/ripped_bins").expanduser().resolve()
     if not ripbin_dir.exists():
         print(f"Ripbin dir does not exist at {ripbin_dir}")
@@ -320,10 +329,10 @@ def stats(
     bins_info = []
 
     for parent in riplist:
-        info_file = parent / 'info.json'
+        info_file = parent / "info.json"
         info = {}
         try:
-            with open(info_file, 'r') as f:
+            with open(info_file, "r") as f:
                 info = json.load(f)
         except FileNotFoundError:
             print(f"File not found: {info_file}")
@@ -335,8 +344,7 @@ def stats(
             print(f"An error occurred: {e}")
             continue
 
-
-        bin_file = parent / info['binary_name']
+        bin_file = parent / info["binary_name"]
         bins_info.append((bin_file, info))
 
     with Pool(processes=workers) as pool:
@@ -344,13 +352,12 @@ def stats(
 
     stats = {}
     for res in results:
-        cur_key = (res[0]['target'], res[0]['optimization'])
+        cur_key = (res[0]["target"], res[0]["optimization"])
         if cur_key not in stats.keys():
-            stats[cur_key] = arch_stats(0,0,0)
-        stats[cur_key].files +=1
+            stats[cur_key] = arch_stats(0, 0, 0)
+        stats[cur_key].files += 1
         stats[cur_key].size += res[1]
         stats[cur_key].funcs += res[2]
-
 
     for (arch, opt), data in stats.items():
         if arch != "":
@@ -365,24 +372,23 @@ def stats(
 @app.command()
 def export_large_dataset(
     target: Annotated[str, typer.Argument()],
-    output_dir: Annotated[str,
-                          typer.Option(
-                              help="Save the binaries to a directory")] = "",
-    output_file: Annotated[str,
-                           typer.Option(
-                               help="Save the binaries paths to a file")] = "",
+    output_dir: Annotated[
+        str, typer.Option(help="Save the binaries to a directory")
+    ] = "",
+    output_file: Annotated[
+        str, typer.Option(help="Save the binaries paths to a file")
+    ] = "",
     min_text_bytes: Annotated[
-        int,
-        typer.Option(
-            help="Minimum number of bytes in a files .text section")] = 2000,
-    drop_dups: Annotated[bool,
-                         typer.Option(
-                             help="Don't include duplicate files")] = True,
+        int, typer.Option(help="Minimum number of bytes in a files .text section")
+    ] = 2000,
+    drop_dups: Annotated[
+        bool, typer.Option(help="Don't include duplicate files")
+    ] = True,
     verbose: Annotated[bool, typer.Option] = False,
 ):
-    '''
+    """
     Export a dataset from the ripkit db
-    '''
+    """
 
     out_to_dir = False
     out_to_file = False
@@ -449,10 +455,10 @@ def export_large_dataset(
     for opt_lvl, bins in no_dups_bins.items():
         print(f"[LEN] Before | {opt_lvl} | {len(bins)}")
         cur_good_bins = []
-        #TEMP_COUNT = 0
+        # TEMP_COUNT = 0
         for bin in track(
-                bins,
-                description=f"Checking {opt_lvl} | {len(bins)} bin sizes..."):
+            bins, description=f"Checking {opt_lvl} | {len(bins)} bin sizes..."
+        ):
 
             # If the name of the binary has already been
             # found to be short in other opt lvls, don't
@@ -510,11 +516,10 @@ def export_large_dataset(
 
     # Write to the output file
     if out_to_file:
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             for key in final_bins.keys():
                 f.write(str(key) + "\n")
-                f.write("\n".join(
-                    str(bin.resolve()) for bin in final_bins[key]))
+                f.write("\n".join(str(bin.resolve()) for bin in final_bins[key]))
 
     # Write to output dir
     if out_to_dir:
@@ -524,33 +529,34 @@ def export_large_dataset(
             opt_out_dir = out_dir / f"{key}_lvl_bins"
             opt_out_dir.mkdir()
             for bin in track(
-                    bins,
-                    description=f"Copying {len(bins)} bins for opt {key}..."):
+                bins, description=f"Copying {len(bins)} bins for opt {key}..."
+            ):
                 dest_file = opt_out_dir / bin.name
                 shutil.copy(bin.resolve(), dest_file.resolve())
     return
 
 
-#TODO: drop bit and file type and replace with a target type.
+# TODO: drop bit and file type and replace with a target type.
 #       may be have create a custom type that wraps targets for rust and
 #       go
 @app.command()
 def export_large_target_dataset(
-    target: Annotated[str, typer.Argument(
-        help="Target triplet to compile")],
-    output_dir: Annotated[str, typer.Argument(
-        help="Save the binaries to a directory")],
-    output_file: Annotated[str, typer.Option(
-        help="Save the binaries paths to a file")] = "",
-    min_text_bytes: Annotated[ int, typer.Option(
-        help="Minimum number of bytes in a files .text section")] = 2000,
-    drop_dups: Annotated[bool, typer.Option(
-        help="Don't include duplicate files")] = True,
+    target: Annotated[str, typer.Argument(help="Target triplet to compile")],
+    output_dir: Annotated[str, typer.Argument(help="Save the binaries to a directory")],
+    output_file: Annotated[
+        str, typer.Option(help="Save the binaries paths to a file")
+    ] = "",
+    min_text_bytes: Annotated[
+        int, typer.Option(help="Minimum number of bytes in a files .text section")
+    ] = 2000,
+    drop_dups: Annotated[
+        bool, typer.Option(help="Don't include duplicate files")
+    ] = True,
     verbose: Annotated[bool, typer.Option] = False,
 ):
-    '''
-    Export a dataset from the CRATES IO DB 
-    '''
+    """
+    Export a dataset from the CRATES IO DB
+    """
 
     out_to_dir = False
     out_to_file = False
@@ -618,13 +624,13 @@ def export_large_target_dataset(
     for opt_lvl, bins in no_dups_bins.items():
         print(f"[LEN] Before | {opt_lvl} | {len(bins)}")
         cur_good_bins = []
-        #TEMP_COUNT = 0
+        # TEMP_COUNT = 0
         for bin in track(
-                bins,
-                description=f"Checking {opt_lvl} | {len(bins)} bin sizes..."):
+            bins, description=f"Checking {opt_lvl} | {len(bins)} bin sizes..."
+        ):
 
-            #TEMP_COUNT+=1
-            #if TEMP_COUNT > 100:
+            # TEMP_COUNT+=1
+            # if TEMP_COUNT > 100:
             #    break
             # If the name of the binary has already been
             # found to be short in other opt lvls, don't
@@ -682,11 +688,10 @@ def export_large_target_dataset(
 
     # Write to the output file
     if out_to_file:
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             for key in final_bins.keys():
                 f.write(str(key) + "\n")
-                f.write("\n".join(
-                    str(bin.resolve()) for bin in final_bins[key]))
+                f.write("\n".join(str(bin.resolve()) for bin in final_bins[key]))
 
     # Write to output dir
     if out_to_dir:
@@ -696,8 +701,8 @@ def export_large_target_dataset(
             opt_out_dir = out_dir / f"{key}_lvl_bins"
             opt_out_dir.mkdir()
             for bin in track(
-                    bins,
-                    description=f"Copying {len(bins)} bins for opt {key}..."):
+                bins, description=f"Copying {len(bins)} bins for opt {key}..."
+            ):
                 dest_file = opt_out_dir / bin.name
                 shutil.copy(bin.resolve(), dest_file.resolve())
     return
@@ -711,7 +716,7 @@ def get_funcs_with(files, backend):
     total_funcs = 0
 
     if Path(files).is_dir():
-        files = list(Path(files).glob('*'))
+        files = list(Path(files).glob("*"))
     else:
         files = [Path(files)]
 
@@ -719,7 +724,7 @@ def get_funcs_with(files, backend):
 
         f_size[path] = path.stat().st_size
 
-        if backend == 'lief':
+        if backend == "lief":
             functions = get_functions(path)
             parsed_bin = lief.parse(str(path.resolve()))
 
@@ -739,35 +744,35 @@ def get_funcs_with(files, backend):
 
             funcs_txt = {
                 x.addr: (x.name, x.size)
-                for x in functions if x.addr > base_address +
-                text_section.virtual_address and x.addr < base_address +
-                text_section.virtual_address + len(text_bytes)
+                for x in functions
+                if x.addr > base_address + text_section.virtual_address
+                and x.addr
+                < base_address + text_section.virtual_address + len(text_bytes)
             }
 
             return funcs_all, funcs_txt
 
-        elif backend == 'ghidra':
-            #TODO
+        elif backend == "ghidra":
+            # TODO
             return []
-        elif backend == 'ida':
-            #TODO
-            print('nop')
+        elif backend == "ida":
+            # TODO
+            print("nop")
             return []
-        elif backend == 'objdump1':
+        elif backend == "objdump1":
             cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort"
-            res = subprocess.run(cmd,
-                                 shell=True,
-                                 universal_newlines=True,
-                                 capture_output=True)
+            res = subprocess.run(
+                cmd, shell=True, universal_newlines=True, capture_output=True
+            )
             return res.stdout
 
-        elif backend == 'objdump2':
-            #TODO
+        elif backend == "objdump2":
+            # TODO
             cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'"
             res = subprocess.check_output(cmd, shell=True)
             total_funcs += int(res)
-        elif backend == 'readelf':
-            #TODO
+        elif backend == "readelf":
+            # TODO
             cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
             res = subprocess.check_output(cmd, shell=True)
             print(res)
@@ -778,39 +783,38 @@ def get_funcs_with(files, backend):
 def parse_obj_stdout(inp):
     addrs = []
 
-    for line in inp.split('\n'):
-        addr = line.split(' ')[0].strip()
-        if addr != '':
+    for line in inp.split("\n"):
+        addr = line.split(" ")[0].strip()
+        if addr != "":
             addrs.append(int(addr, 16))
     return addrs
 
 
 @app.command()
 def count_diff(
-    inp: Annotated[str,
-                   typer.Argument(
-                       help="Directory containing files -or- single file")],
+    inp: Annotated[
+        str, typer.Argument(help="Directory containing files -or- single file")
+    ],
     backend: Annotated[
-        str,
-        typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")],
+        str, typer.Argument(help="lief, ghidra, ida, objdump1, objdump2, readelf")
+    ],
     backend2: Annotated[str, typer.Argument()],
 ):
-    '''
-    For generation of ground truth there are various tools that can be used to 
-    extract the addresses. Interesting, despite the function addresses and 
-    function lengths are explicitly stated in the binary file. Therefore this 
-    function will take different 'backends' (the tools to extract) the 
-    ground truth and compre them! 
-    '''
-
+    """
+    For generation of ground truth there are various tools that can be used to
+    extract the addresses. Interesting, despite the function addresses and
+    function lengths are explicitly stated in the binary file. Therefore this
+    function will take different 'backends' (the tools to extract) the
+    ground truth and compre them!
+    """
 
     if backend == "lief":
-        tot_funcs, txt_funcs = get_funcs_with(inp, 'lief')
+        tot_funcs, txt_funcs = get_funcs_with(inp, "lief")
         print(txt_funcs)
 
     if backend2 == "objdump1":
         # Need to parse this output for functions
-        stdout_res = get_funcs_with(inp, 'objdump1')
+        stdout_res = get_funcs_with(inp, "objdump1")
         func_addrs = np.array(parse_obj_stdout(stdout_res))
         print(func_addrs)
 
@@ -833,21 +837,22 @@ def count_diff(
     print(f"The repeated function in obj: {multi_obj}")
     print(f"The repeated function in obj: {len(multi_obj)}")
 
-    with open("SAME", 'w') as f:
+    with open("SAME", "w") as f:
         for addr in same:
             f.write(f"{hex(addr)}\n")
 
-    with open("LIEF_UNIQUE", 'w') as f:
+    with open("LIEF_UNIQUE", "w") as f:
         for addr in lief_only:
             f.write(f"{hex(addr)}\n")
 
-    with open("OBJ_UNIQUE", 'w') as f:
+    with open("OBJ_UNIQUE", "w") as f:
         for addr in obj_only:
             f.write(f"{hex(addr)}\n")
 
     # Then comparse the parsed output with the functions given by lief
 
     return
+
 
 #
 # @app.command()
@@ -889,19 +894,19 @@ def count_diff(
 #         print("Using Lief for function boundary")
 #
 #         res = """
-#         NOTICE: elffile seems to ignore functions injected by gcc such as 
-#         "register_tm...", "deregister_tm...", 
-#         Therefore those names will be included in the list, but will have 
-#         a size of 0 
+#         NOTICE: elffile seems to ignore functions injected by gcc such as
+#         "register_tm...", "deregister_tm...",
+#         Therefore those names will be included in the list, but will have
+#         a size of 0
 #             elf = ELFFile(f)
 #
 #             # Get the symbol table
 #             symbol_table = elf.get_section_by_name('.symtab')
 #
-#             # Create a list of functionInfo objects... symbol_table will give a 
-#             # list of symbols, grab the function sybols and get there name, 
-#             # their 'st_value' which is start addr and size 
-#             functionInfo = [FunctionInfo(x.name, x['st_value'], f"0x{x['st_value']:x}",x['st_size']) 
+#             # Create a list of functionInfo objects... symbol_table will give a
+#             # list of symbols, grab the function sybols and get there name,
+#             # their 'st_value' which is start addr and size
+#             functionInfo = [FunctionInfo(x.name, x['st_value'], f"0x{x['st_value']:x}",x['st_size'])
 #                 for x in symbol_table.iter_symbols() if x['st_info']['type'] == 'STT_FUNC']
 #
 #         """
@@ -1052,8 +1057,8 @@ def count_diff(
 #     return
 #
 
-#@app.command()
-#def build_analyze_all(
+# @app.command()
+# def build_analyze_all(
 #    opt_lvl: Annotated[str, typer.Argument()],
 #    #bit: Annotated[int, typer.Argument()],
 #    filetype: Annotated[str, typer.Argument()],
@@ -1061,7 +1066,7 @@ def count_diff(
 #    stop_on_fail: Annotated[bool, typer.Option()] = False,
 #    force_build_all: Annotated[bool, typer.Option()] = False,
 #    build_arm: Annotated[bool, typer.Option()] = False,
-#):
+# ):
 #    '''
 #    Build and analyze pkgs
 #    '''
@@ -1178,8 +1183,7 @@ def count_diff(
 
 
 def get_text_functions(bin_path: Path):
-    '''
-    '''
+    """ """
     bin = lief.parse(str(bin_path.resolve()))
 
     text_section = bin.get_section(".text")
@@ -1210,17 +1214,17 @@ def get_text_functions(bin_path: Path):
 
 
 def gen_strip_file(bin_path: Path):
-    '''
-    Strip the passed file and return the path of the 
+    """
+    Strip the passed file and return the path of the
     stripped file
-    '''
+    """
 
     # Copy the bin and strip it
     strip_bin = bin_path.parent / Path(bin_path.name + "_STRIPPED")
     shutil.copy(bin_path, Path(strip_bin))
 
     try:
-        _ = subprocess.check_output(['strip', f'{strip_bin.resolve()}'])
+        _ = subprocess.check_output(["strip", f"{strip_bin.resolve()}"])
     except subprocess.CalledProcessError as e:
         print("Error running command:", e)
         return Path("")
@@ -1230,15 +1234,16 @@ def gen_strip_file(bin_path: Path):
 
 @app.command()
 def DatasetStats(
-    dataset: Annotated[str, typer.Argument(help="Input dataset")], func_size: Annotated[
-        int,
-        typer.Argument(
-            help="Minimum size of function to be considered function")]):
-    '''
+    dataset: Annotated[str, typer.Argument(help="Input dataset")],
+    func_size: Annotated[
+        int, typer.Argument(help="Minimum size of function to be considered function")
+    ],
+):
+    """
     Get info on dataset. Expects a dataset to be all binaries, and all nonstripped
-    '''
+    """
 
-    bins = list(Path(dataset).glob('*'))
+    bins = list(Path(dataset).glob("*"))
 
     stats = DatasetStat(0, 0, 0, 0, 0, 0, 0)
 
@@ -1251,8 +1256,7 @@ def DatasetStats(
         functions = get_functions(bin)
         name_counts = Counter([x.name for x in functions])
 
-        alias_count = sum(
-            [count for _, count in name_counts.items() if count >= 2])
+        alias_count = sum([count for _, count in name_counts.items() if count >= 2])
         stats.alias_count += alias_count
 
         min_size_functions = [x for x in functions if x.size >= func_size]
@@ -1273,6 +1277,7 @@ def DatasetStats(
         stats.text_section_size += len(text_bytes)
     print(stats)
     return
+
 
 if __name__ == "__main__":
 

@@ -1,7 +1,4 @@
-from ..bin_types import (
-    RegBit,
-    FileFormat
-)
+from ..bin_types import RegBit, FileFormat
 
 from .binary_analyzer import (
     FoundFunctions,
@@ -33,10 +30,10 @@ from .ripbin_deterministic_db import (
     save_lief_ground_truth,
 )
 
-#from .ripbin_db import (
+# from .ripbin_db import (
 #    get_registry,
 #    save_and_register_analysis,
-#)
+# )
 from .analyzer_types import (
     AnalysisType,
     FileType,
@@ -55,6 +52,4 @@ from .cli_utils import (
     iterable_path_deep_callback,
 )
 
-from .attack_types import (
-    CompileTimeAttacks
-)
+from .attack_types import CompileTimeAttacks

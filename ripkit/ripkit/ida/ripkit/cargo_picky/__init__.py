@@ -1,8 +1,4 @@
-
-from ..bin_types import (
-    RegBit,
-    FileFormat
-)
+from ..bin_types import RegBit, FileFormat
 
 from .crates_io import (
     pull_registry,
@@ -16,14 +12,14 @@ from .crates_io import (
 
 from .cargo_builder import (
     gen_cargo_build_cmd,
-    #build_crate_many_target,
+    # build_crate_many_target,
     gen_cross_build_cmd,
     build_crate,
     get_target_productions,
     is_executable,
 )
 
-#from .cargo_reg_puller import (
+# from .cargo_reg_puller import (
 #    pull_registry,
 #    get_registry_df,
 #    clone_crate,
@@ -36,7 +32,7 @@ from .cargo_builder import (
 #    get_build_productions,
 #    load_rlib,
 #    get_file_type,
-#)
+# )
 
 from .cargo_types import (
     Cargodb,
@@ -50,4 +46,3 @@ from .cargo_types import (
 from .picky_exceptions import (
     CrateBuildException,
 )
-    

@@ -1,4 +1,4 @@
-'''
+"""
 Ripbin db... A new updgrade to support
 - Much faster searching of bins in db 
     - SQL db to improve bin look up 
@@ -16,7 +16,7 @@ Removing capabilites...
     needs to be synced with the current database.
     - Each binary will be saved to DB, then added to the DB 
     - Removing a binary will first remove from SQL then remove from DB
-'''
+"""
 
 import hashlib
 from enum import Enum
@@ -36,18 +36,14 @@ from sqlalchemy.ext.declarative import declarative_base
 
 
 # Information that is saved with a binary...
-    # Compilationation...
-        # Compiler 
-            # Version
-            # Toolchain 
-        # Flags and arguments
-        # Archetitecture
-            # Target triplet
-            # -or- tuple of OS / ARCH 
-            # -or- etc
-    # Post Comp Changes...
-        # Binary rewriting strategy
-
-
-
-
+# Compilationation...
+# Compiler
+# Version
+# Toolchain
+# Flags and arguments
+# Archetitecture
+# Target triplet
+# -or- tuple of OS / ARCH
+# -or- etc
+# Post Comp Changes...
+# Binary rewriting strategy

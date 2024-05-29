@@ -1,33 +1,30 @@
-
-[tool.poetry.scripts]
-ripkit = "ripkit.main:app"
-
 [tool.poetry]
 name = "ripkit"
-version = "0.2.0"
+version = "0.1.0"
 description = ""
-authors = ["ESPR3SS0"]
+authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
-typer = "^0.9.0"
+python = ">=3.10,<=3.11"
+typer = "^0.12.3"
+rich = "^13.7.1"
+numpy = "^1.26.4"
+matplotlib = "^3.9.0"
+art = "^6.2"
+alive-progress = "^3.1.5"
+lief = "^0.14.1"
+polars = "^0.20.28"
 python-magic = "^0.4.27"
-capstone = "^5.0.1"
-pyelftools = "^0.29"
+pyelftools = "^0.31"
 pefile = "^2023.2.7"
-#polars = "^0.19.0"
-pandas = "^2.1.0"
-lief = "^0.13.2"
-alive-progress = "^3.1.4"
-matplotlib = "^3.7.2"
-rich = "^13.6.0"
-setuptools = "^69.0.2"
-art = "^6.1"
-scipy = "^1.12.0"
-#jupyterlab = "^4.1.5"
-polars = "^0.20.25"
+capstone = "^5.0.1"
+pandas = "^2.2.2"
+scipy = "^1.13.1"
 
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
 
 [build-system]
 requires = ["poetry-core"]
