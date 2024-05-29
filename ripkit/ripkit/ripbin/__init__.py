@@ -31,6 +31,7 @@ from .ripbin_deterministic_db import (
     calculate_md5,
     DB_PATH,
     save_lief_ground_truth,
+    ripbin_init
 )
 
 #from .ripbin_db import (

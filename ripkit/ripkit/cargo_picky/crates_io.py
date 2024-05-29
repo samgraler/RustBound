@@ -36,6 +36,8 @@ def init_crates_io():
     if not CRATES_IO_REG.exists():
         pull_registry()
 
+    # TODO: Crate ~/.crates_io/nonexe_crate_names.txt 
+
 
 def wget_reg():
     

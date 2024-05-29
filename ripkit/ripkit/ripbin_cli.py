@@ -36,8 +36,10 @@ from ripkit.ripbin import (
     stash_bin,
     calculate_md5,
     RustFileBundle,
-    CompileTimeAttacks
+    CompileTimeAttacks,
+    ripbin_init
 )
+
 from cli_utils import get_enum_type
 
 console = Console()
@@ -45,6 +47,7 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 
 CPU_COUNT = multiprocessing.cpu_count()
 CPU_COUNT_75 = math.floor(CPU_COUNT * .75)
+
 
 def build_helper(args):
 
@@ -104,8 +107,6 @@ def build_helper(args):
         print(f"Exception {e} in crate {crate}")
 
     return
-
-
 
 
 def build_and_stash(
@@ -246,6 +247,15 @@ def print_rust_targets():
     output = subprocess.run(cmd, capture_output=True, universal_newlines=True)
     res = output.stdout
     print(res)
+    return
+
+@app.command()
+def init():
+    '''
+    Initialize the ripbin db
+    '''
+
+    ripbin_init()
     return
 
 @app.command()

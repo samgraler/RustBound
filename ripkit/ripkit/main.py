@@ -412,7 +412,7 @@ def export_large_dataset(
         return
 
     # Get a dictionary of all the binaries that are in the ripbin db
-    org_bins = get_all_bins()
+    org_bins = ripbin_cli.get_all_bins()
 
     # Need to find all the bins that exist in each opt lvl
     # and that are atleast the min number of bytes long
