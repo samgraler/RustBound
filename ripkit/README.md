@@ -9,7 +9,7 @@ function boundaries in Rust Binaries. Then compare the performance to that
 of tools like Ghidra and IDA! 
 
 
-### Cli Overview (Subject to alot of change)
+### Cli Overview (Subject to a lot of change)
 1. Automated cloning and compiling of Rust Crates
 2. Profiling of dataset based on patterns 
 3. Modification of binaries in dataset
@@ -20,7 +20,7 @@ Adjacent CLI's have also been made separate from Ripkit...
 2. XDA training and testing
 
 
-### Research indepth
+### Research in depth
 Bound Detector is a comparison of 4 different tools ability to detect
 function boundaries in stripped binary files generated from Rust. 
 

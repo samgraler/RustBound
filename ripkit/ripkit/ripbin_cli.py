@@ -172,7 +172,7 @@ def get_bins(
     '''
 
     bins = []
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / 'info.json'
         try:
             with open(info_file, 'r') as f:
@@ -207,7 +207,7 @@ def get_all_bins() -> dict:
         's': [],
     }
 
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / 'info.json'
         info = {}
         try:
@@ -277,7 +277,7 @@ def build_stash_all(
     # If we don't have to build all the crates, find the crates that
     # are already built with the specified optimization and arch
     # an dremovet that from the list of installed crates
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / 'info.json'
         info = {}
         try:
@@ -340,7 +340,7 @@ def seq_build_all_and_stash(
     # If we don't have to build all the crates, find the crates that
     # are already built with the specified optimization and arch
     # an dremovet that from the list of installed crates
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / 'info.json'
         info = {}
         try:

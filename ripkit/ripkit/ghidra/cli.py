@@ -746,7 +746,7 @@ def install_ghidra():
 
     # Make the ghidra_scripts dir and place the 
     #  List_Function_and_Entry.py file there
-    scripts = Path("/home/user/ghidra_scripts")
+    scripts = Path("~/ghidra_scripts").expanduser().resolve()
     if not scripts.exists():
         scripts.mkdir()
 

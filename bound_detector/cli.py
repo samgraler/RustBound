@@ -1140,7 +1140,7 @@ def train_on(
 #    ##
 #    rust_files = []
 #
-#    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
 #        info_file = parent / 'info.json'
 #        info = {}
 #        try:
@@ -1203,7 +1203,7 @@ def train_on(
 #    # Get the test files
 #    rust_test_files = [ x.name for x in test_path.glob('*')]
 #
-#    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
 #        info_file = parent / 'info.json'
 #        info = {}
 #        try:

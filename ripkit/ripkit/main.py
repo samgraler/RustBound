@@ -1010,7 +1010,7 @@ def count_diff(
 #     # If we don't have to build all the crates, find the crates that
 #     # are already built with the specified optimization and arch
 #     # an dremovet that from the list of installed crates
-#     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#     for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
 #         info_file = parent / 'info.json'
 #         info = {}
 #         try:
@@ -1087,7 +1087,7 @@ def count_diff(
 #    # an dremovet that from the list of installed crates
 #    if not force_build_all:
 #
-#        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#        for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
 #            info_file = parent / 'info.json'
 #            info = {}
 #            try:

@@ -203,7 +203,7 @@ def get_all_bins()->dict:
     }
 
 
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / 'info.json'
         info = {}
         try:
@@ -553,7 +553,7 @@ def stats():
 
     stats = { }
 
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / 'info.json'
         info = {}
         try:
@@ -929,7 +929,7 @@ def build_analyze_all(
 
     if not force_build_all:
 
-        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+        for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
             info_file = parent / 'info.json'
             info = {}
             try:
