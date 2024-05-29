@@ -10,7 +10,7 @@ import numpy as np
 import ghidra.cli as ghidra_cli
 import cargo_picky.db_cli as cargo_db_cli
 
-from typing import List, Tuple
+from typing import List, Tuple, Any
 import ida.cli as ida_cli
 import shutil
 from dataclasses import dataclass, asdict
@@ -63,6 +63,11 @@ import math
 
 num_cores = multiprocessing.cpu_count()
 CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
+
+
+# TODO: I have seen that global variables are to be avoided, however this one makes alot of sense... look into why we "should" avoid them and considered alternative ways to set them
+RIPBIN_BASE = Path("~/.ripbin").expanduser().resolve()
+RIPBIN_BINS = RIPBIN_BASE.joinpath("ripped_bins")
 
 
 @dataclass
@@ -118,166 +123,35 @@ class SequenceCounter:
 
 @app.command()
 def disasm(
-    file: Annotated[str, typer.Argument(help="Input file")],
+    file: Annotated[Path, typer.Argument(help="Input file")],
     addr: Annotated[str, typer.Argument(help="Address to start at in hex")],
     num_bytes: Annotated[int, typer.Argument(help="Number of bytes to disassameble")],
 ):
     """
-    Copy of objdump... in python
+    This function was a proof of concept and is meant to match the function of
+    objdump (objdump is a linux command, see objdump --help for more info)
+
+    Parameters
+    ----------
+    file : Path
+        The input file to disassemble
+    addr : str
+        The address in hex to start the disassemlby
+    num_bytes: int
+        The number of bytes to disassemble
     """
 
-    file_path = Path(file)
-
-    if not file_path.exists():
+    if not file.exists():
         return
 
-    res = disasm_at(file_path, int(addr, 16), num_bytes)
+    res = disasm_at(file, int(addr, 16), num_bytes)
     for line in res:
         print(line)
     return
 
 
-# @app.command()
-# def build(
-#    crate: Annotated[str, typer.Argument(help="crate name")],
-#    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-#    target: Annotated[str, typer.Argument(help="crate target")],
-#    strip: Annotated[bool, typer.Option()] = False,
-#    verbose: Annotated[bool, typer.Option()] = False,
-# ):
-#    '''
-#    Build a crate for a specific target
-#    '''
-#
-#    #TODO: For simpilicity I prompt for only
-#    # 64 vs 32 bit and pe vs elf. Really I
-#    # should prompt for the whole target arch
-#    # b/c theres many different ways to get
-#    # a 64bit pe  or 32bit elf
-#
-#    # Opt lvl call back
-#    try:
-#        opt = opt_lvl_callback(opt_lvl)
-#    except Exception as e:
-#        print(e)
-#        return
-#
-#    # Match the target to its enum
-#    target_enum = get_enum_type(RustcTarget, target)
-#    if not strip:
-#        strip_lvl = RustcStripFlags.NOSTRIP
-#    else:
-#        # SYM_TABLE is the all the symbols
-#        strip_lvl = RustcStripFlags.SYM_TABLE
-#
-#    if target_enum == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-#        build_crate(crate,
-#                    opt,
-#                    target_enum,
-#                    strip_lvl,
-#                    use_cargo=True,
-#                    debug=verbose)
-#    else:
-#        build_crate(crate,
-#                    opt,
-#                    target_enum,
-#                    strip_lvl,
-#                    use_cargo=False,
-#                    debug=verbose)
-#
-#    print(f"Crate {crate} built")
-#    return
-#
-#
-# @app.command()
-# def build_all(
-#    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-#    target: Annotated[str, typer.Argument()],
-# ):
-#    '''
-#    Build all the installed crates
-#    '''
-#
-#    #TODO: For simpilicity I prompt for only
-#    # 64 vs 32 bit and pe vs elf. Really I
-#    # should prompt for the whole target arch
-#    # b/c theres many different ways to get
-#    # a 64bit pe  or 32bit elf
-#
-#    # Opt lvl call back
-#    try:
-#        opt = opt_lvl_callback(opt_lvl)
-#    except Exception as e:
-#        print(e)
-#        return
-#
-#    strip_lvl = RustcStripFlags.NOSTRIP
-#
-#    # List of crate current installed
-#    installed_crates = [
-#        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-#        if x.is_dir()
-#    ]
-#
-#    target = get_enum_type(RustcTarget, target)
-#
-#    for crate in alive_it(installed_crates):
-#        if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-#            build_crate(crate,
-#                        opt,
-#                        target,
-#                        strip_lvl,
-#                        use_cargo=True,
-#                        debug=True)
-#        else:
-#            try:
-#                build_crate(crate, opt, target, strip_lvl)
-#            except Exception as e:
-#                print(f"Error on {crate}")
-#
-#
-# @app.command()
-# def analyze(
-#    bin_path: Annotated[str, typer.Argument()],
-#    language: Annotated[str, typer.Argument()],
-#    opt_lvl: Annotated[str, typer.Argument(help="O0, O1, O2, O3, Oz, Os")],
-#    save: Annotated[bool, typer.Option()] = True,
-#    verbose: Annotated[bool, typer.Option()] = False,
-#    overwrite_existing: Annotated[bool, typer.Option()] = False,
-# ):
-#    '''
-#    Analyze binary file
-#    '''
-#
-#    binary = Path(bin_path).resolve()
-#    if not binary.exists():
-#        print(f"Binary {binary} doesn't exist")
-#        return
-#
-#    # Generate analysis
-#    if verbose:
-#        print("Generating Tensors...")
-#    data = generate_minimal_labeled_features(binary)
-#
-#    # Create the file info
-#    if verbose: print("Calculating bin hash...")
-#    binHash = calculate_md5(binary)
-#
-#    # TODO: Anlysis not being saved with target or ELF vs PE?
-#
-#    # Create the file info
-#    info = RustFileBundle(binary.name, binHash, "", opt_lvl,
-#                          binary.name, "", "")
-#
-#    if verbose: print("Saving Tensor and binary")
-#    # Save analyiss
-#    save_analysis(binary,
-#                  data,
-#                  AnalysisType.ONEHOT_PLUS_FUNC_LABELS,
-#                  info,
-#                  overwrite_existing=overwrite_existing)
-
-
+# TODO: This function should be replaced with one already
+#       written in the ripkit lib somewhere
 def lief_num_funcs(path: Path):
 
     functions = get_functions(path)
@@ -302,9 +176,21 @@ def lief_num_funcs(path: Path):
     return len(func_start_addrs.keys())
 
 
-def stat_worker(bin_info):
+# TODO: Type hinting could be more specific than Any
+#       Likey it would be better to return a dataclass
+def stat_worker(bin_info: List[Any]) -> List[Any]:
     """
     Worker to retrieve stats from ripbin
+
+    Parameters
+    ----------
+    bin_info :  list[any]
+        A list of length 2, first elements is bin, second element is info
+
+
+    Returns
+    -------
+    List
     """
     bin_file = bin_info[0]
     info = bin_info[1]
@@ -315,20 +201,23 @@ def stat_worker(bin_info):
 @app.command()
 def stats(
     workers: Annotated[int, typer.Option(help="Number of workers")] = CPU_COUNT_75,
-):
+) -> None:
     """
     Print statistics about the ripped binaries in the ripbin database
-    """
-    ripbin_dir = Path("~/.ripbin/ripped_bins").expanduser().resolve()
-    if not ripbin_dir.exists():
-        print(f"Ripbin dir does not exist at {ripbin_dir}")
-        return
 
-    riplist = list(ripbin_dir.iterdir())
+    Parameters
+    ----------
+    workers: int
+        The number of CPU cores, or workers, to use
+    """
+
+    if not RIPBIN_BINS.exists():
+        print(f"Ripbin dir does not exist at {RIPBIN_BINS}")
+        return
 
     bins_info = []
 
-    for parent in riplist:
+    for parent in list(RIPBIN_BINS.iterdir()):
         info_file = parent / "info.json"
         info = {}
         try:
@@ -369,11 +258,13 @@ def stats(
     return
 
 
+# TODO: output file should be depreciated
+# TODO It shouldn't be possible to have "duplicates" in ripbin. Specifically never should the same source code be compiled the exact same way and get saved twice to ripbin. Assert that this is true and depreciated drop_dups
 @app.command()
 def export_large_dataset(
     target: Annotated[str, typer.Argument()],
     output_dir: Annotated[
-        str, typer.Option(help="Save the binaries to a directory")
+        Path, typer.Option(help="Save the binaries to a directory")
     ] = "",
     output_file: Annotated[
         str, typer.Option(help="Save the binaries paths to a file")
@@ -385,9 +276,24 @@ def export_large_dataset(
         bool, typer.Option(help="Don't include duplicate files")
     ] = True,
     verbose: Annotated[bool, typer.Option] = False,
-):
+) -> None:
     """
     Export a dataset from the ripkit db
+
+    Parameters
+    ----------
+    target: str
+        The rustc supported target triplet to compile for
+    output_dir: Path
+        The path to export the dataset to
+    output_file: str
+        The file to export the dataset names to
+    min_text_bytes: int
+        The minimum number of bytes a file must have in the .text section to export
+    drop_dups: bool
+        To drop duplicate file names
+    verbose: bool
+        Verbose messaging to CLI
     """
 
     out_to_dir = False
@@ -544,7 +450,7 @@ def export_large_target_dataset(
     target: Annotated[str, typer.Argument(help="Target triplet to compile")],
     output_dir: Annotated[str, typer.Argument(help="Save the binaries to a directory")],
     output_file: Annotated[
-        str, typer.Option(help="Save the binaries paths to a file")
+        Path, typer.Option(help="Save the binaries paths to a file")
     ] = "",
     min_text_bytes: Annotated[
         int, typer.Option(help="Minimum number of bytes in a files .text section")
@@ -558,33 +464,19 @@ def export_large_target_dataset(
     Export a dataset from the CRATES IO DB
     """
 
-    out_to_dir = False
-    out_to_file = False
-
-    if output_dir != "":
-        out_to_dir = True
-
-        out_dir = Path(output_dir)
-
-        if out_dir.exists():
-            print("The output directory already exists, please remove it:!")
-            print("Run the following command if you are sure...")
-            print(f"rm -rf {out_dir.resolve()}")
-            return
-
-    if output_file != "":
-        out_to_file = True
-        out_file = Path(output_file)
-        if out_file.exists():
-            print("The output directory already exists, please remove it:!")
-            print("Run the following command if you are sure...")
-            print(f"rm -rf {out_file.resolve()}")
-            return
-
-    if not out_to_file and not out_to_dir:
-        print("No output to file or directory given")
+    if out_dir.exists():
+        print("The output directory already exists, please remove it:!")
+        print("Run the following command if you are sure...")
+        print(f"rm -rf {out_dir.resolve()}")
         return
 
+    if out_file.exists():
+        print("The output directory already exists, please remove it:!")
+        print("Run the following command if you are sure...")
+        print(f"rm -rf {out_file.resolve()}")
+        return
+
+    # Get the corresponding target enum
     target_enum = get_enum_type(RustcTarget, target)
 
     # Get a dictionary of all the binaries that are in the ripbin db
@@ -695,7 +587,6 @@ def export_large_target_dataset(
 
     # Write to output dir
     if out_to_dir:
-        out_dir = Path(output_dir)
         out_dir.mkdir()
         for key, bins in final_bins.items():
             opt_out_dir = out_dir / f"{key}_lvl_bins"
