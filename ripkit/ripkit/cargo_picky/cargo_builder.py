@@ -1,26 +1,6 @@
 """
-Cross compiling rust is not as easy as the rust book makes it sounds...
-1. After following rust book instrutios to
-    - rustup toolchain install <x_chain>
-    - rustup target add <x_target>
-    You also need the correct linker installed for rustc!!
-
-So all this really meant was I must use cargo for building, because 
-after:
-    - rustup target add <x_target> 
-    you can:
-    - cargo build --target <x_target>
-
-This is fine, and only using rustc was not going to get me far anyways.
-
-This files roadmap:
-    [] automate cargo building 
-        [] package_dir
-        [] optimizations
-        [] strip or not strip 
-    [] automate cross compiling 
-    [] automate extracting rlib files
-        [] "ar x *.rlib file" ; Which may produce alot of files
+Cargo builder provides the functions to generate cargo + cross commands to 
+build creates found in the ~/.crates_io directory
 """
 
 import lief
@@ -76,7 +56,8 @@ def gen_cargo_build_cmd(proj_path: Path, target: RustcTarget,
 def gen_cross_build_cmd(proj_path: Path, target: RustcTarget, 
                         strip_cmd: Optional[RustcStripFlags] = None, 
                         opt_lvl: Optional[RustcOptimization] = None,
-                        attack: Optional[CompileTimeAttacks] = None ):
+                        attack: Optional[CompileTimeAttacks] = None,
+                        force_podman: bool = False):
     # First build the environment variables,
     # the CARGO_ENCODED_RUSTC_FLAGS -otherwise called- 
     #   CargoVariables.RUSTC_FLAGS 
@@ -93,7 +74,10 @@ def gen_cross_build_cmd(proj_path: Path, target: RustcTarget,
     if attack is not None:
         substrs.append(f"RUSTFLAGS='-C {attack.value}'")
 
-    substrs.append(f"cd {proj_path} && cross build --target={target.value}")
+    if force_podman:
+        substrs.append(f"cd {proj_path} && CROSS_CONTAINER_ENGINE=podman cross build --target={target.value}")
+    else:
+        substrs.append(f"cd {proj_path} && cross build --target={target.value}")
 
     full_build_str = " ".join(x for x in substrs)
     return full_build_str
@@ -104,7 +88,7 @@ def build_crate(crate: str,
                 target: RustcTarget = RustcTarget.X86_64_UNKNOWN_LINUX_GNU, 
                 strip: RustcStripFlags = RustcStripFlags.NOSTRIP,
                 use_cargo=False,
-                debug=False)->None:
+                force_podman=False)->None:
     ''' Build the repo '''
 
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
@@ -112,14 +96,10 @@ def build_crate(crate: str,
     if use_cargo:
         cmd = gen_cargo_build_cmd(crate_path,target,strip, opt_lvl)
     else:
-        cmd = gen_cross_build_cmd(crate_path,target,strip, opt_lvl)
-
-    if debug:
-        print(f"Cmd {cmd}")
+        cmd = gen_cross_build_cmd(crate_path,target,strip, opt_lvl,force_podman=force_podman)
 
     # If the crate doesn't exist dont run
     if not crate_path.exists(): 
-        if debug: print("The crate hasn't been clone into the db yet")
         raise Exception(f"Crate {crate} has not been cloned")
     try: 
         if not debug:
@@ -274,9 +254,6 @@ def get_target_productions(crate: str, target: RustcTarget,
     Grab a specific target produced files
     """
 
-    # Target dir is the base target dir of the crate
-    #target_dir = CLONED_DIR.joinpath(crate).joinpath("target")
-
     target_dir = Path(LocalCratesIO.CRATES_DIR.value).joinpath(crate).joinpath("target")
 
     # If the specific target exists as a sub dir of the general target 
@@ -287,13 +264,5 @@ def get_target_productions(crate: str, target: RustcTarget,
         return find_built_files(deep_target_dir,target_suffixes,exclude_suffixes)
 
 
-
-
 if __name__ == "__main__":
-
-    #bul_str = gen_cross_build_cmd(Path("hello.rs"), 
-    #            target = RustcTarget.X86_64_PC_WINDOWS_GNU, 
-    #            strip_cmd = RustcStripFlags.SYM_TABLE, 
-    #            opt_lvl = RustcOptimization.O1)
-    build_crate('exa',RustcOptimization.O0, RustcTarget.X86_64_PC_WINDOWS_MSVC, RustcStripFlags.NOSTRIP)
-    print("done")
+    print('nop')

@@ -426,15 +426,23 @@ def score_worker(bins_and_preds:List[tuple[Path,Path]]):
 
 @app.command()
 def read_results(
-    result_dir: Annotated[str,typer.Argument(
-        callback = iterable_path_deep_callback
+    results: Annotated[str,typer.Argument(
+        callback = iterable_path_deep_callback,
+        help="A directory that is full of results",
                 )],
     bin_dir: Annotated[str, typer.Argument(
-        callback = iterable_path_shallow_callback
+        callback = iterable_path_shallow_callback,
+        help = "The directory of binaires that correspond to results",
                 )],
-    workers: Annotated[int, typer.Option()] = 24,
-    verbose: Annotated[bool, typer.Option()] = False,
-    save_to_tex: Annotated[Path, typer.Option()] = Path(""),
+    workers: Annotated[int, typer.Option(
+        help = "Number of workers to use"
+            )] = 24,
+    verbose: Annotated[bool, typer.Option(
+        help = "verbosity level"
+            )] = False,
+    save_to_tex: Annotated[Path, typer.Option(
+        help = "Save results to a .tex file to copy and paste"
+            )] = Path(""),
     ):
     '''
     Read the results from the input dir
@@ -758,11 +766,18 @@ def install_ghidra():
 
 @app.command()
 def test_bounds(
-        binary_dir: Annotated[str, typer.Argument()],
-        output_dir: Annotated[str,typer.Argument()],
-        #noanalysis: Annotated[bool, typer.Option()]=False,
-        strip_file: Annotated[bool,typer.Option()]=False,
-        use_offset: Annotated[bool, typer.Option()]=True,
+        bin_dir: Annotated[str, typer.Argument(
+            help="A directory of binaires to test on"
+            )],
+        output_dir: Annotated[str,typer.Argument(
+            help="A directory to save the result to"
+            )],
+        strip_file: Annotated[bool,typer.Option(
+            help="Strip the binaries before testing"
+            )]=False,
+        use_offset: Annotated[bool, typer.Option(
+            help="Ghidra applies an 'offset' to addresses, set to True to auto detect this offset and adjust accordingly"
+            )]=True,
     ):
 
     # Create the pathlib objects 

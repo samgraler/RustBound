@@ -536,20 +536,16 @@ def export_large_dataset(
 #       go
 @app.command()
 def export_large_target_dataset(
-    target: Annotated[str, typer.Argument()],
-    output_dir: Annotated[str,
-                          typer.Argument(
-                              help="Save the binaries to a directory")],
-    output_file: Annotated[str,
-                           typer.Option(
-                               help="Save the binaries paths to a file")] = "",
-    min_text_bytes: Annotated[
-        int,
-        typer.Option(
-            help="Minimum number of bytes in a files .text section")] = 2000,
-    drop_dups: Annotated[bool,
-                         typer.Option(
-                             help="Don't include duplicate files")] = True,
+    target: Annotated[str, typer.Argument(
+        help="Target triplet to compile")],
+    output_dir: Annotated[str, typer.Argument(
+        help="Save the binaries to a directory")],
+    output_file: Annotated[str, typer.Option(
+        help="Save the binaries paths to a file")] = "",
+    min_text_bytes: Annotated[ int, typer.Option(
+        help="Minimum number of bytes in a files .text section")] = 2000,
+    drop_dups: Annotated[bool, typer.Option(
+        help="Don't include duplicate files")] = True,
     verbose: Annotated[bool, typer.Option] = False,
 ):
     '''
@@ -800,8 +796,11 @@ def count_diff(
     backend2: Annotated[str, typer.Argument()],
 ):
     '''
-    See the difference between different approaches to ground
-    truth
+    For generation of ground truth there are various tools that can be used to 
+    extract the addresses. Interesting, despite the function addresses and 
+    function lengths are explicitly stated in the binary file. Therefore this 
+    function will take different 'backends' (the tools to extract) the 
+    ground truth and compre them! 
     '''
 
 
@@ -1231,7 +1230,7 @@ def gen_strip_file(bin_path: Path):
 
 @app.command()
 def DatasetStats(
-    dataset: Annotated[str, typer.Argument()], func_size: Annotated[
+    dataset: Annotated[str, typer.Argument(help="Input dataset")], func_size: Annotated[
         int,
         typer.Argument(
             help="Minimum size of function to be considered function")]):

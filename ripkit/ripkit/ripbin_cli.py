@@ -52,13 +52,16 @@ def build_helper(args):
     opt = args[1]
     target = args[2]
     overwrite_existing = args[3]
+    verbose = args[4]
+    podman = args[5]
 
     strip=RustcStripFlags.NOSTRIP
     use_cargo=False
 
     # Build the crate
     try:
-        build_crate(crate, opt, target, strip, use_cargo=use_cargo)
+        build_crate(crate, opt, target, strip, use_cargo=use_cargo,
+                    force_podman=podman)
     except CrateBuildException as e:
         print(f"[bold red][FAILED][/bold red] Crate {crate} failed to build")
 
@@ -70,7 +73,8 @@ def build_helper(args):
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
     else:
-        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
+        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt,
+                                        force_podman=podman)
 
     # Get files of interest from the crate at the target <target>
     files_of_interest = [
@@ -78,9 +82,9 @@ def build_helper(args):
     ]
 
     if files_of_interest == []:
-        print(f"[bold yellow][BORING][/bold yellow]Crate {crate} had no executable production")
-        # TODO: in the crates_io cache which cloned pkgs don't build any
-        #       files of interest so they are not rebuilt
+        print(f"[bold yellow][BORING][/bold yellow] Crate {crate} had no executable production")
+        if verbose:
+            print(f"    [bold yellow][VERBOSE][/bold yellow] Crate {crate} cmd: {build_cmd}")
         return 99
 
     print(f"[bold green][SUCCESS][/bold green]Crate {crate}")
@@ -102,7 +106,6 @@ def build_helper(args):
         stash_bin(binary, info, overwrite_existing=overwrite_existing)
     except Exception as e:
         print(f"Exception {e} in crate {crate}")
-
     return
 
 
@@ -193,56 +196,12 @@ def get_bins(
     return bins
 
 
-def get_all_bins() -> dict:
-    '''
-    Get all the binaries by the optimization
-    '''
-
-    bin_by_opt = {
-        '0': [],
-        '1': [],
-        '2': [],
-        '3': [],
-        'z': [],
-        's': [],
-    }
-
-    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-        info_file = parent / 'info.json'
-        info = {}
-        try:
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
-
-        # Define the binary file name
-        bin_file = parent / info['binary_name']
-
-        opt = info['optimization']
-
-        if opt not in bin_by_opt.keys():
-            bin_by_opt[opt] = []
-        else:
-            bin_by_opt[opt].append(bin_file.resolve())
-    return bin_by_opt
-
-
 @app.command()
 def print_rust_targets():
     '''
     Print the rust targets
     '''
-
     cmd = shlex.split('rustc --print target-list')
-
     output = subprocess.run(cmd, capture_output=True, universal_newlines=True)
     res = output.stdout
     print(res)
@@ -250,10 +209,12 @@ def print_rust_targets():
 
 @app.command()
 def build_stash_all(
-    opt_lvl: Annotated[str, typer.Argument()],
+    opt_lvl: Annotated[str, typer.Argument(help="The optimization level to compile for")],
     target: Annotated[str, typer.Argument(help="crate target")],
-    num_workers: Annotated[int, typer.Option()] = CPU_COUNT_75,
-    overwrite_existing: Annotated[bool, typer.Option()] = False,
+    num_workers: Annotated[int, typer.Option(help="number of workers")] = CPU_COUNT_75,
+    overwrite_existing: Annotated[bool, typer.Option(help="Overwrite existing binaries in the db")] = False,
+    verbose: Annotated[bool, typer.Option(help="Print verbose info")] = False,
+    force_podman: Annotated[bool, typer.Option(help="Force the usage of podman for the Cross engine")] = False,
 ):
     '''
     Build the crates in crates io and stash into ripbin db
@@ -304,7 +265,7 @@ def build_stash_all(
     args = []
 
     for crate in crates_to_build:
-        args.append((crate,opt,target_enum,overwrite_existing))
+        args.append((crate,opt,target_enum,overwrite_existing, verbose, force_podman))
 
     with Pool(processes=num_workers) as pool:
         results = pool.map(build_helper, args)
@@ -314,12 +275,12 @@ def build_stash_all(
 
 @app.command()
 def seq_build_all_and_stash(
-    opt_lvl: Annotated[str, typer.Argument()],
+    opt_lvl: Annotated[str, typer.Argument(help="opt lvl to compile for")],
     target: Annotated[str, typer.Argument(help="crate target")],
-    stop_on_fail: Annotated[bool, typer.Option()] = False,
+    stop_on_fail: Annotated[bool, typer.Option(help="Stop all compilation when one crate fails")] = False,
 ):
     '''
-    Build the crates in crates io and stash into ripbin db
+    Sequentially build all the crates found in the local crates_io
     '''
 
     # Opt lvl call back
@@ -384,7 +345,7 @@ def export_dataset(
     target: Annotated[str, typer.Argument(help="Compilation Target")],
     opt: Annotated[str, typer.Argument(help="Opt Lvl of bin")],
     output: Annotated[str,
-                      typer.Argument(help="Save the binaries to a directory")],
+                      typer.Argument(help="Directory to save binaries to")],
     min_text_bytes: Annotated[
         int,
         typer.Option(
