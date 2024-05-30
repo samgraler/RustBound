@@ -68,8 +68,9 @@ def build_helper(args):
     # Need the build command for the bundle info, this is NOT used
     # to actually exectue a build command
     if use_cargo:
-        build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt,
-                                        force_podman=force_podman)
+        build_cmd = gen_cargo_build_cmd(
+            crate_path, target, strip, opt, force_podman=force_podman
+        )
     else:
         build_cmd = gen_cross_build_cmd(
             crate_path, target, strip, opt, force_podman=podman
