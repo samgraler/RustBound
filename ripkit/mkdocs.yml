@@ -6,7 +6,12 @@ theme:
 nav:
   - index.md
   - cli_reference.md 
-
+  - cargo_cli.md 
+  - ripbin_cli.md 
+  - ghidra_cli.md 
+  - ida_cli.md 
+  - profile_cli.md 
+  - modify_cli.md 
 
 plugins:
   - search
