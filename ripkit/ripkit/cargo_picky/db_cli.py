@@ -1,3 +1,9 @@
+"""
+db_cli.py
+
+Provide CLI to clone and interact with locally cloned crates
+"""
+
 import typer
 from art import text2art
 from typing_extensions import Annotated
@@ -38,6 +44,9 @@ def clone(
         bool, typer.Option(help="Update the crate if its already cloned")
     ] = False,
 ):
+    """
+    Clone a remote crate from crates.io registry to the local db
+    """
 
     clone_crate(crate, exist_ok=update)
 
@@ -46,10 +55,10 @@ def clone(
 
 @app.command()
 def show_cratesio(
-    column: Annotated[str, typer.Option()] = "",
+    column: Annotated[str, typer.Option(help="Column name to show")] = "",
 ):
     """
-    Show the head of cratesw io dataframe
+    Show the head of crates io dataframe
     """
 
     # Get the df
@@ -67,7 +76,7 @@ def list_cloned(
     no_styling: Annotated[bool, typer.Option()] = False,
 ):
     """
-    List the cloned crates
+    List the locally cloned crates
     """
 
     # List of crate current installed
@@ -87,21 +96,27 @@ def list_cloned(
 
 
 @app.command()
-def is_crate_exe(crate: Annotated[str, typer.Argument()]):
-
+def is_crate_exe(crate: Annotated[str, typer.Argument(help="Name of crate")]):
+    """
+    See if a remote crate produces an executable
+    """
     print(is_remote_crate_exe(crate))
     return
 
 
 @app.command()
 def clone_many_exe(
-    number: Annotated[int, typer.Argument()],
-    stash_nonexe_name: Annotated[bool, typer.Option()] = True,
-    verbose: Annotated[bool, typer.Option()] = False,
-    try_nonexe: Annotated[bool, typer.Option()] = False,
+    number: Annotated[int, typer.Argument(help="Number of crates to clone")],
+    stash_nonexe_name: Annotated[
+        bool,
+        typer.Option(help="Save nonexe crate names to skip this names in the future"),
+    ] = True,
+    verbose: Annotated[bool, typer.Option(help="Verbose")] = False,
+    try_nonexe: Annotated[bool, typer.Option(help="Attempt to clone nonexe's")] = False,
 ):
     """
-    Clone many new executable rust crates.
+    Clone many new executable rust crates.By default only clone crates that
+    look to produce executable binaries, so not libaries.
     """
 
     # Get the remote crate reg
@@ -145,6 +160,7 @@ def clone_many_exe(
 
                     cloned_count += 1
                     bar()
+                # TODO: Make a custom exception for this
                 except Exception as e:
                     print(e)
             elif stash_nonexe_name:
@@ -157,9 +173,13 @@ def clone_many_exe(
 @app.command()
 def clear_cloned():
     """
-    Remove all the cloned crates
+    Remove all the locally cloned crates
     """
 
+    # TODO: I will trying to define all the paths in one file.
+    #       in this case LocalCratesIO. I still like the idea
+    #       of having the paths defined in one file, however
+    #       this line could be implemented more elegantly
     crates = list(Path(LocalCratesIO.CRATES_DIR.value).glob("*"))
 
     print(f"Removing {len(crates)} crates")

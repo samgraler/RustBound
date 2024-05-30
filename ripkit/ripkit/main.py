@@ -48,10 +48,12 @@ from ripkit.ripbin import (
     iterable_path_shallow_callback,
 )
 
-class tmp():
+
+class tmp:
     def main(self):
         """main func!"""
         return
+
 
 console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
@@ -65,12 +67,11 @@ app.add_typer(analyze_cli.app, name="profile", help="Profile and analyze dataset
 app.add_typer(evil_mod.app, name="modify", help="Modify binaries")
 
 
-
 num_cores = multiprocessing.cpu_count()
 CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
 
 
-#TODO: I have seen that global variables are to be avoided, however this one makes alot of sense... look into why we "should" avoid them and considered alternative ways to set them 
+# TODO: I have seen that global variables are to be avoided, however this one makes alot of sense... look into why we "should" avoid them and considered alternative ways to set them
 RIPBIN_DIR = Path("~/.ripbin")
 
 
@@ -132,19 +133,18 @@ def disasm(
     num_bytes: Annotated[int, typer.Argument(help="Number of bytes to disassameble")],
 ):
     """
-    This function was a proof of concept and is meant to match the function of 
+    This function was a proof of concept and is meant to match the function of
     objdump (objdump is a linux command, see objdump --help for more info)
 
     Parameters
     ----------
     file : Path
         The input file to disassemble
-    addr : str 
+    addr : str
         The address in hex to start the disassemlby
     num_bytes: int
         The number of bytes to disassemble
     """
-
 
     if not file.exists():
         return
@@ -155,7 +155,7 @@ def disasm(
     return
 
 
-# TODO: This function should be replaced with one already 
+# TODO: This function should be replaced with one already
 #       written in the ripkit lib somewhere
 def lief_num_funcs(path: Path):
 
@@ -181,9 +181,9 @@ def lief_num_funcs(path: Path):
     return len(func_start_addrs.keys())
 
 
-#TODO: Type hinting could be more specific than Any
+# TODO: Type hinting could be more specific than Any
 #       Likey it would be better to return a dataclass
-def stat_worker(bin_info: List[Any])->List[Any]:
+def stat_worker(bin_info: List[Any]) -> List[Any]:
     """
     Worker to retrieve stats from ripbin
 
@@ -206,14 +206,14 @@ def stat_worker(bin_info: List[Any])->List[Any]:
 @app.command()
 def stats(
     workers: Annotated[int, typer.Option(help="Number of workers")] = CPU_COUNT_75,
-)->None:
+) -> None:
     """
     Print statistics about the ripped binaries in the ripbin database
 
     Parameters
     ----------
     workers: int
-        The number of CPU cores, or workers, to use 
+        The number of CPU cores, or workers, to use
     """
 
     ripbin_dir = Path("~/.ripbin/ripped_bins").expanduser().resolve()
@@ -267,8 +267,8 @@ def stats(
     return
 
 
-#TODO: output file should be depreciated
-#TODO It shouldn't be possible to have "duplicates" in ripbin. Specifically never should the same source code be compiled the exact same way and get saved twice to ripbin. Assert that this is true and depreciated drop_dups
+# TODO: output file should be depreciated
+# TODO It shouldn't be possible to have "duplicates" in ripbin. Specifically never should the same source code be compiled the exact same way and get saved twice to ripbin. Assert that this is true and depreciated drop_dups
 @app.command()
 def export_large_dataset(
     target: Annotated[str, typer.Argument()],
@@ -285,7 +285,7 @@ def export_large_dataset(
         bool, typer.Option(help="Don't include duplicate files")
     ] = True,
     verbose: Annotated[bool, typer.Option] = False,
-)->None:
+) -> None:
     """
     Export a dataset from the ripkit db
 
@@ -296,7 +296,7 @@ def export_large_dataset(
     output_dir: Path
         The path to export the dataset to
     output_file: str
-        The file to export the dataset names to 
+        The file to export the dataset names to
     min_text_bytes: int
         The minimum number of bytes a file must have in the .text section to export
     drop_dups: bool
@@ -752,6 +752,7 @@ def count_diff(
     # Then comparse the parsed output with the functions given by lief
 
     return
+
 
 def get_text_functions(bin_path: Path):
     """ """

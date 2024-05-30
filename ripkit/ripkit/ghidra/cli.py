@@ -1,3 +1,9 @@
+"""
+cli.py
+
+CLI interface to extract detected function with ghidra
+"""
+
 from dataclasses import dataclass, asdict
 import typer
 import math
@@ -828,6 +834,10 @@ def test_bounds(
         ),
     ] = True,
 ):
+    """
+    Run ghidra to detect the bounds on the input files. Save results to a directory
+    to be later read
+    """
 
     # Create the pathlib objects
     binary_dir_path = Path(binary_dir)

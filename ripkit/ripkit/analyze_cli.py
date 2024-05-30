@@ -1,12 +1,11 @@
 from typing_extensions import Annotated
 import lief
+from typing import List, Any
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
 import multiprocessing
 from rich.console import Console
 import typer
-
-
 import math
 
 
@@ -30,7 +29,10 @@ console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
-def profile_worker(dataset_and_sequence):
+def profile_worker(dataset_and_sequence: List[Any]) -> List[Any]:
+    """
+    Worker intened to run in process pool to help profiling
+    """
 
     dataset = dataset_and_sequence[0]
     sequence = dataset_and_sequence[1]
@@ -43,7 +45,7 @@ def profile_worker(dataset_and_sequence):
 def profile_epilogues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
     length: Annotated[int, typer.Argument(help="Number of bytes for the epilogue")],
-    savefile: Annotated[str, typer.Argument(help="File to save to")],
+    logfile: Annotated[Path, typer.Argument(help="File to save to")],
     workers: Annotated[int, typer.Argument(help="Number of workers")] = CPU_COUNT_75,
 ):
     """
@@ -51,12 +53,12 @@ def profile_epilogues(
     whether or not the epilogues occur in other places that are not epilogues.
     """
 
-    savepath = Path(savefile)
-    if savepath.exists():
-        print(f"Path {savepath} already exists")
+    if logfile.exists():
+        print(f"Path {logfile} already exists")
         return
+
     progs = {}
-    files = list(Path(dataset).glob("*"))
+    files = list(Path(dataset.glob("*")))
     for file in alive_it(files):
 
         # Get the functions
@@ -138,7 +140,7 @@ def profile_epilogues(
     prog_counter["seq_len"] = length
     prog_counter["counts"] = asdict(start_counter)
 
-    with open(savepath, "w") as f:
+    with open(logfile, "w") as f:
         json.dump(prog_counter, f)
     return
 
@@ -147,7 +149,7 @@ def profile_epilogues(
 def profile_prologues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
     length: Annotated[int, typer.Argument(help="Number of bytes for the prologue")],
-    savefile: Annotated[str, typer.Argument(help="File to save to")],
+    logfile: Annotated[str, typer.Argument(help="File to save to")],
     workers: Annotated[int, typer.Argument(help="Number of workers")] = CPU_COUNT_75,
 ):
     """
@@ -155,9 +157,8 @@ def profile_prologues(
     whether or not the prologues occur in other places that are not prologues.
     """
 
-    savepath = Path(savefile)
-    if savepath.exists():
-        print(f"Path {savepath} already exists")
+    if logfile.exists():
+        print(f"Path {logfile} already exists")
         return
 
     progs = {}
@@ -239,7 +240,7 @@ def profile_prologues(
     prog_counter["seq_len"] = length
     prog_counter["counts"] = asdict(start_counter)
 
-    with open(savepath, "w") as f:
+    with open(logfile, "w") as f:
         json.dump(prog_counter, f)
     return
 
