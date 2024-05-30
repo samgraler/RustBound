@@ -21,6 +21,10 @@ pefile = "^2023.2.7"
 capstone = "^5.0.1"
 pandas = "^2.2.2"
 scipy = "^1.13.1"
+mkdocs = "^1.6.0"
+mkdocs-material = "^9.5.25"
+mkdocstrings = "^0.25.1"
+mkdocstrings-python = "^1.10.3"
 
 
 [tool.poetry.group.dev.dependencies]
