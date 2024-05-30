@@ -92,6 +92,13 @@ sudo apt install podman
 # See dockers website for docker
 ```
 
+## Docs
+
+mkdocs is used for documentation. Currently you must serve them youself:
+```
+mkdocs serve -a 0.0.0.0:8000
+```
+Docs will then be at http://0.0.0.0:8000
 
 ## Roadmap...
 
