@@ -60,18 +60,20 @@ def build_helper(args):
     except CrateBuildException as e:
         print(f"[bold red][FAILED][/bold red] Crate {crate} failed to build")
 
+    print(f"[bold green][BUILT][/bold green] Crate {crate} built")
+
     # Need this to get the build command
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     # Need the build command for the bundle info, this is NOT used
     # to actually exectue a build command
     if use_cargo:
-        build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
+        build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt,
+                                        force_podman=force_podman)
     else:
         build_cmd = gen_cross_build_cmd(
             crate_path, target, strip, opt, force_podman=podman
         )
-
     # Get files of interest from the crate at the target <target>
     files_of_interest = [
         x for x in get_target_productions(crate, target) if is_executable(x)
@@ -83,7 +85,7 @@ def build_helper(args):
         )
         if verbose:
             print(
-                f"    [bold yellow][VERBOSE][/bold yellow] Crate {crate} cmd: {build_cmd}"
+                f" [bold yellow][VERBOSE][/bold yellow] Crate {crate} cmd: {build_cmd}"
             )
         return 99
 
@@ -277,14 +279,13 @@ def build_stash_all(
             if (x := info["binary_name"]) in crates_to_build:
                 crates_to_build.remove(x)
 
-    success = 0
     # Build and analyze each crate
     args = []
-
     for crate in crates_to_build:
         args.append(
             (crate, opt, target_enum, overwrite_existing, verbose, force_podman)
         )
+    print(f"Building {len(args)} crates!")
 
     with Pool(processes=num_workers) as pool:
         results = pool.map(build_helper, args)

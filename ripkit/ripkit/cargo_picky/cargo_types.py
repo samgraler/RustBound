@@ -7,10 +7,10 @@ from pathlib import Path
 
 
 class Cargodb(Enum):
-    REG_DIR = Path("~/.cargo_reg/").expanduser()
-    CLONED_DIR = Path("~/.cargo_reg/cargo_cloned").expanduser()
-    EXTRACTED_TAR_DIR = Path("~/.cargo_reg/tar_data").expanduser()
-    DATA_DIR = Path("~/.cargo_reg/tar_data/data").expanduser()
+    REG_DIR = Path("~/.cargo_reg/").expanduser().resolve()
+    CLONED_DIR = Path("~/.cargo_reg/cargo_cloned").expanduser().resolve()
+    EXTRACTED_TAR_DIR = Path("~/.cargo_reg/tar_data").expanduser().resolve()
+    DATA_DIR = Path("~/.cargo_reg/tar_data/data").expanduser().resolve()
 
 
 class FileType(Enum):
