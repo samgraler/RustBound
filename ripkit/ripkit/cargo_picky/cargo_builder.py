@@ -204,6 +204,7 @@ def is_executable(path: Path) -> bool:
     bin = None
     try:
         if not path.is_file():
+            return False
 
         # TODO: So for some reason lief.parse() prints
         # to stdout when the file type is unknown AND
