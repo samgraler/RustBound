@@ -1,5 +1,4 @@
 import typer
-import shlex
 from rich import print
 from multiprocessing import Pool
 import multiprocessing
@@ -29,17 +28,8 @@ import ripbin_cli
 import analyze_cli
 import evil_mod
 
-console = Console()
-app = typer.Typer(pretty_exceptions_show_locals=False)
-app.add_typer(ghidra_cli.app, name="ghidra", help="Ghidra related functions")
-app.add_typer(ida_cli.app, name="ida", help="IDA related functions")
-app.add_typer(cargo_db_cli.app, name="cargo", help="Pull cargo crates")
-app.add_typer(
-    ripbin_cli.app, name="ripbin", help="Build and stash binaries into ripbin db"
-)
-app.add_typer(analyze_cli.app, name="profile", help="Profile and analyze datasets")
-app.add_typer(evil_mod.app, name="modify", help="Modify binaries")
-
+from cli_utils import opt_lvl_callback, get_enum_type
+import math
 from ripkit.cargo_picky import (
     build_crate,
     RustcStripFlags,
@@ -58,16 +48,30 @@ from ripkit.ripbin import (
     iterable_path_shallow_callback,
 )
 
-from cli_utils import opt_lvl_callback, get_enum_type
-import math
+class tmp():
+    def main(self):
+        """main func!"""
+        return
+
+console = Console()
+app = typer.Typer(pretty_exceptions_show_locals=False)
+app.add_typer(ghidra_cli.app, name="ghidra", help="Ghidra related functions")
+app.add_typer(ida_cli.app, name="ida", help="IDA related functions")
+app.add_typer(cargo_db_cli.app, name="cargo", help="Pull cargo crates")
+app.add_typer(
+    ripbin_cli.app, name="ripbin", help="Build and stash binaries into ripbin db"
+)
+app.add_typer(analyze_cli.app, name="profile", help="Profile and analyze datasets")
+app.add_typer(evil_mod.app, name="modify", help="Modify binaries")
+
+
 
 num_cores = multiprocessing.cpu_count()
 CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
 
 
-# TODO: I have seen that global variables are to be avoided, however this one makes alot of sense... look into why we "should" avoid them and considered alternative ways to set them
-RIPBIN_BASE = Path("~/.ripbin").expanduser().resolve()
-RIPBIN_BINS = RIPBIN_BASE.joinpath("ripped_bins")
+#TODO: I have seen that global variables are to be avoided, however this one makes alot of sense... look into why we "should" avoid them and considered alternative ways to set them 
+RIPBIN_DIR = Path("~/.ripbin")
 
 
 @dataclass
@@ -128,18 +132,19 @@ def disasm(
     num_bytes: Annotated[int, typer.Argument(help="Number of bytes to disassameble")],
 ):
     """
-    This function was a proof of concept and is meant to match the function of
+    This function was a proof of concept and is meant to match the function of 
     objdump (objdump is a linux command, see objdump --help for more info)
 
     Parameters
     ----------
     file : Path
         The input file to disassemble
-    addr : str
+    addr : str 
         The address in hex to start the disassemlby
     num_bytes: int
         The number of bytes to disassemble
     """
+
 
     if not file.exists():
         return
@@ -150,7 +155,7 @@ def disasm(
     return
 
 
-# TODO: This function should be replaced with one already
+# TODO: This function should be replaced with one already 
 #       written in the ripkit lib somewhere
 def lief_num_funcs(path: Path):
 
@@ -176,9 +181,9 @@ def lief_num_funcs(path: Path):
     return len(func_start_addrs.keys())
 
 
-# TODO: Type hinting could be more specific than Any
+#TODO: Type hinting could be more specific than Any
 #       Likey it would be better to return a dataclass
-def stat_worker(bin_info: List[Any]) -> List[Any]:
+def stat_worker(bin_info: List[Any])->List[Any]:
     """
     Worker to retrieve stats from ripbin
 
@@ -201,23 +206,27 @@ def stat_worker(bin_info: List[Any]) -> List[Any]:
 @app.command()
 def stats(
     workers: Annotated[int, typer.Option(help="Number of workers")] = CPU_COUNT_75,
-) -> None:
+)->None:
     """
     Print statistics about the ripped binaries in the ripbin database
 
     Parameters
     ----------
     workers: int
-        The number of CPU cores, or workers, to use
+        The number of CPU cores, or workers, to use 
     """
 
-    if not RIPBIN_BINS.exists():
-        print(f"Ripbin dir does not exist at {RIPBIN_BINS}")
+    ripbin_dir = Path("~/.ripbin/ripped_bins").expanduser().resolve()
+
+    if not ripbin_dir.exists():
+        print(f"Ripbin dir does not exist at {ripbin_dir}")
         return
+
+    riplist = list(ripbin_dir.iterdir())
 
     bins_info = []
 
-    for parent in list(RIPBIN_BINS.iterdir()):
+    for parent in riplist:
         info_file = parent / "info.json"
         info = {}
         try:
@@ -258,8 +267,8 @@ def stats(
     return
 
 
-# TODO: output file should be depreciated
-# TODO It shouldn't be possible to have "duplicates" in ripbin. Specifically never should the same source code be compiled the exact same way and get saved twice to ripbin. Assert that this is true and depreciated drop_dups
+#TODO: output file should be depreciated
+#TODO It shouldn't be possible to have "duplicates" in ripbin. Specifically never should the same source code be compiled the exact same way and get saved twice to ripbin. Assert that this is true and depreciated drop_dups
 @app.command()
 def export_large_dataset(
     target: Annotated[str, typer.Argument()],
@@ -276,7 +285,7 @@ def export_large_dataset(
         bool, typer.Option(help="Don't include duplicate files")
     ] = True,
     verbose: Annotated[bool, typer.Option] = False,
-) -> None:
+)->None:
     """
     Export a dataset from the ripkit db
 
@@ -287,7 +296,7 @@ def export_large_dataset(
     output_dir: Path
         The path to export the dataset to
     output_file: str
-        The file to export the dataset names to
+        The file to export the dataset names to 
     min_text_bytes: int
         The minimum number of bytes a file must have in the .text section to export
     drop_dups: bool
@@ -743,335 +752,6 @@ def count_diff(
     # Then comparse the parsed output with the functions given by lief
 
     return
-
-
-#
-# @app.command()
-# def count_funcs(
-#     inp: Annotated[str,
-#                    typer.Argument(
-#                        help="Directory containing files -or- single file")],
-#     backend: Annotated[
-#         str,
-#         typer.Argument(
-#             help="lief, ghidra, ida, objdump1, objdump2, readelf")] = 'lief',
-#     list_functions: Annotated[
-#         bool,
-#         typer.Option(
-#             help="List all the functions in the given files")] = False,
-# ):
-#     '''
-#     Count the functions in the .text section. Files must be non-stripped
-#     '''
-#
-#     num_funcs = {}
-#     f_size = {}
-#     lief_total = {}
-#
-#     # Check that the backend is good
-#     if backend not in [
-#             "lief", "ghidra", "ida", "objdump1", "objdump2", "readelf"
-#     ]:
-#         print(f"The backend is not in {backend}")
-#         return
-#
-#     if Path(inp).is_dir():
-#         files = list(Path(inp).glob('*'))
-#     else:
-#         files = [Path(inp)]
-#
-#     total_funcs = 0
-#     if backend == 'lief':
-#         print("Using Lief for function boundary")
-#
-#         res = """
-#         NOTICE: elffile seems to ignore functions injected by gcc such as
-#         "register_tm...", "deregister_tm...",
-#         Therefore those names will be included in the list, but will have
-#         a size of 0
-#             elf = ELFFile(f)
-#
-#             # Get the symbol table
-#             symbol_table = elf.get_section_by_name('.symtab')
-#
-#             # Create a list of functionInfo objects... symbol_table will give a
-#             # list of symbols, grab the function sybols and get there name,
-#             # their 'st_value' which is start addr and size
-#             functionInfo = [FunctionInfo(x.name, x['st_value'], f"0x{x['st_value']:x}",x['st_size'])
-#                 for x in symbol_table.iter_symbols() if x['st_info']['type'] == 'STT_FUNC']
-#
-#         """
-#         print(res)
-#     elif backend == 'ida':
-#         print('nop')
-#     elif backend == 'objdump1':
-#         cmd = "objdump -t -f <FILE_PATH> | grep 'F .text' | sort | wc -l"
-#         print(f"The command being used is {cmd}")
-#     elif backend == 'objdump2':
-#         cmd = "objdump -d <FILE_PATH> | grep -cE '^[[:xdigit:]]+ <[^>]+>:'"
-#         print(f"The command being used is {cmd}")
-#     elif backend == 'readelf':
-#         cmd = "readelf -Ws <FILE_PATH> | grep FUNC | wc -l"
-#         print(f"The command being used is {cmd}")
-#
-#     for path in alive_it(files):
-#
-#         f_size[path] = path.stat().st_size
-#
-#         if backend == 'lief':
-#             functions = get_functions(path)
-#             parsed_bin = lief.parse(str(path.resolve()))
-#
-#             # Get the text session
-#             text_section = parsed_bin.get_section(".text")
-#
-#             # Get the bytes in the .text section
-#             text_bytes = text_section.content
-#
-#             # Get the base address of the loaded binary
-#             base_address = parsed_bin.imagebase
-#
-#             lief_total[path] = len(functions)
-#             func_start_addrs = {
-#                 x.addr: (x.name, x.size)
-#                 for x in functions if x.addr > base_address +
-#                 text_section.virtual_address and x.addr < base_address +
-#                 text_section.virtual_address + len(text_bytes)
-#             }
-#
-#             num_funcs[path] = len(func_start_addrs.keys())
-#             if list_functions:
-#                 for addr, (name, size) in func_start_addrs.items():
-#                     print(f'{hex(addr)} : {name}')
-#
-#         elif backend == 'ghidra':
-#             #TODO
-#             print('nop')
-#         elif backend == 'ida':
-#             #TODO
-#             print('nop')
-#         elif backend == 'objdump1':
-#             #TODO
-#             cmd = f"objdump -t -f {path.resolve()} | grep 'F .text' | sort | wc -l"
-#             res = subprocess.check_output(cmd, shell=True)
-#             total_funcs += int(res)
-#         elif backend == 'objdump2':
-#             #TODO
-#             cmd = f"objdump -d {path.resolve()} | grep -cE '^[[:xdigit:]]+ <[^>]+>:'"
-#             res = subprocess.check_output(cmd, shell=True)
-#             total_funcs += int(res)
-#         elif backend == 'readelf':
-#             #TODO
-#             cmd = f"readelf -Ws {path.resolve()} | grep FUNC | wc -l"
-#             res = subprocess.check_output(cmd, shell=True)
-#             print(res)
-#
-#     if backend == 'lief':
-#         print(f"lief Total funcs: {sum(lief_total.values())}")
-#         print(f"Total funcs: {sum(num_funcs.values())}")
-#         print(f"Total file size: {sum(f_size.values())}")
-#     else:
-#         print(f"Total functions: {total_funcs}")
-#         print(f"Total files: {len(files)}")
-#
-#     return
-#
-#
-# @app.command()
-# def build_all_and_stash(
-#     opt_lvl: Annotated[str, typer.Argument()],
-#     target: Annotated[str, typer.Argument(help="crate target")],
-#     stop_on_fail: Annotated[bool, typer.Option()] = False,
-# ):
-#     '''
-#     Build the crates in crates io and stash into ripbin db
-#     '''
-#
-#     # Opt lvl call back
-#     try:
-#         opt = opt_lvl_callback(opt_lvl)
-#     except Exception as e:
-#         print(e)
-#         return
-#
-#     target_enum = get_enum_type(RustcTarget, target)
-#
-#     # List of crate current installed that can be built
-#     crates_to_build = [
-#         x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-#         if x.is_dir()
-#     ]
-#
-#     # If we don't have to build all the crates, find the crates that
-#     # are already built with the specified optimization and arch
-#     # an dremovet that from the list of installed crates
-#     for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-#         info_file = parent / 'info.json'
-#         info = {}
-#         try:
-#             with open(info_file, 'r') as f:
-#                 info = json.load(f)
-#         except FileNotFoundError:
-#             print(f"File not found: {info_file}")
-#             continue
-#         except json.JSONDecodeError as e:
-#             print(f"JSON decoding error: {e}")
-#             continue
-#         except Exception as e:
-#             print(f"An error occurred: {e}")
-#             continue
-#
-#         if info['optimization'].upper() in opt_lvl and \
-#             info['target'].upper() in target_enum.value.upper():
-#             # Remove this file from the installed crates list
-#             if (x := info['binary_name']) in crates_to_build:
-#                 crates_to_build.remove(x)
-#
-#     success = 0
-#     # Build and analyze each crate
-#     for crate in alive_it(crates_to_build):
-#         res = 0
-#         try:
-#             res = build_and_stash(crate,
-#                             opt,
-#                             target_enum,
-#                             use_cargo=False)
-#         except CrateBuildException as e:
-#             print(f"[bold red]Failed to build crate {crate}:: {e}[/bold red]")
-#             continue
-#         if res != 99:
-#             success += 1
-#             print(f"[bold green][SUCCESS][/bold green] crate {crate}")
-#
-#     print(f"[bold green][SUCCESS] {success}")
-#     print(f"[bold red][FAILED] {len(crates_to_build)-success}")
-#     return
-#
-
-# @app.command()
-# def build_analyze_all(
-#    opt_lvl: Annotated[str, typer.Argument()],
-#    #bit: Annotated[int, typer.Argument()],
-#    filetype: Annotated[str, typer.Argument()],
-#    target: Annotated[str, typer.Argument(help="crate target")],
-#    stop_on_fail: Annotated[bool, typer.Option()] = False,
-#    force_build_all: Annotated[bool, typer.Option()] = False,
-#    build_arm: Annotated[bool, typer.Option()] = False,
-# ):
-#    '''
-#    Build and analyze pkgs
-#    '''
-#
-#    # Opt lvl call back
-#    try:
-#        opt = opt_lvl_callback(opt_lvl)
-#    except Exception as e:
-#        print(e)
-#        return
-#
-#    target_enum = get_enum_type(RustcTarget, target)
-#
-#    # List of crate current installed that can be built
-#    crates_to_build = [
-#        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir()
-#        if x.is_dir()
-#    ]
-#
-#    # If we don't have to build all the crates, find the crates that
-#    # are already built with the specified optimization and arch
-#    # an dremovet that from the list of installed crates
-#    if not force_build_all:
-#
-#        for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
-#            info_file = parent / 'info.json'
-#            info = {}
-#            try:
-#                with open(info_file, 'r') as f:
-#                    info = json.load(f)
-#            except FileNotFoundError:
-#                print(f"File not found: {info_file}")
-#                continue
-#            except json.JSONDecodeError as e:
-#                print(f"JSON decoding error: {e}")
-#                continue
-#            except Exception as e:
-#                print(f"An error occurred: {e}")
-#                continue
-#
-#            if info['optimization'].upper() in opt_lvl and \
-#                info['target'].upper() in target_enum.value.upper():
-#                # Remove this file from the installed crates list
-#                if (x := info['binary_name']) in crates_to_build:
-#                    crates_to_build.remove(x)
-#
-#    # Any crates that are already built with the same target don't rebuild or analyze
-#
-#    # Need to get all the analysis for the given optimization and target...
-#    crates_with_no_interest = Path(
-#        f"~/.crates_io/uninteresting_crates_cache_{target_enum.value}"
-#    ).expanduser()
-#
-#    boring_crates = []
-#    # If the file doesn't exist throw in the empty list
-#    if not crates_with_no_interest.exists():
-#        crates_with_no_interest.touch()
-#        with open(crates_with_no_interest, 'w') as f:
-#            json.dump({'names': boring_crates}, f)
-#
-#    # Add to the boring crates that aren't being built if we are
-#    # not forcing the build of all crates
-#    if not force_build_all:
-#        # If the file does exist read it, ex
-#        with open(crates_with_no_interest, 'r') as f:
-#            boring_crates.extend(json.load(f)['names'])
-#
-#    # Dont build any crate that have been found to have no executable
-#    crates_to_build = [x for x in crates_to_build if x not in boring_crates]
-#
-#    #for x in boring_crates:
-#    #    if x in crates_to_build:
-#    #        crates_to_build.remove(x)
-#
-#    success = 0
-#
-#    # Build and analyze each crate
-#    for crate in alive_it(crates_to_build):
-#        #TODO: the following conditional is here because when building for
-#        #       x86_64 linux I know that cargo will work, and I know
-#        #       cargo's toolchain version
-#        res = 0
-#        if target == RustcTarget.X86_64_UNKNOWN_LINUX_GNU:
-#            try:
-#                res = build_analyze_crate(crate,
-#                                          opt,
-#                                          target_enum,
-#                                          filetype,
-#                                          RustcStripFlags.NOSTRIP,
-#                                          use_cargo=True)
-#            except CrateBuildException:
-#                print(f"Failed to build crate {crate}")
-#        else:
-#            try:
-#                res = build_analyze_crate(crate,
-#                                          opt,
-#                                          target_enum,
-#                                          filetype,
-#                                          RustcStripFlags.NOSTRIP,
-#                                          use_cargo=False)
-#            except CrateBuildException:
-#                print(f"Failed to build crate {crate}")
-#                continue
-#        if res == 99:
-#            boring_crates.append(crate)
-#            print(f"Success build but adding {crate} to boring crates")
-#            with open(crates_with_no_interest, 'w') as f:
-#                json.dump({'names': boring_crates}, f)
-#        else:
-#            success += 1
-#            print(f"[SUCCESS] crate {crate}")
-#
-#    print(f"Total build success: {success}")
-
 
 def get_text_functions(bin_path: Path):
     """ """
