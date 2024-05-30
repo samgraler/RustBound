@@ -1012,3 +1012,4 @@ def build_analyze_all(
 
 if __name__ == "__main__":
     app()
+

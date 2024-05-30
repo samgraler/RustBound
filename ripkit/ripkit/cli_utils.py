@@ -1,7 +1,5 @@
 from enum import Enum
-from ripkit.cargo_picky import (
-    RustcOptimization
-)
+from ripkit.cargo_picky import RustcOptimization
 
 
 class CallBackException(Exception):
@@ -24,18 +22,12 @@ def opt_lvl_callback(opt_lvl):
     elif opt_lvl == "Os":
         opt = RustcOptimization.OS
     else:
-        raise CallBackException(
-            "{} is an invalid optimization lvl".format(opt_lvl))
+        raise CallBackException("{} is an invalid optimization lvl".format(opt_lvl))
     return opt
-
 
 
 def get_enum_type(enum, input_string) -> Enum:
     try:
         return enum(input_string)
     except Exception:
-        raise ValueError(
-            f"No matching enum type for the string '{input_string}'")
-
-
-
+        raise ValueError(f"No matching enum type for the string '{input_string}'")

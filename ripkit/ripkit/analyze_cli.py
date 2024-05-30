@@ -1,12 +1,11 @@
 from typing_extensions import Annotated
 import lief
+from typing import List, Any
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
 import multiprocessing
 from rich.console import Console
 import typer
-
-
 import math
 
 
@@ -22,48 +21,44 @@ from ripkit.ripbin import (
 )
 
 
-
-
 num_cores = multiprocessing.cpu_count()
-CPU_COUNT_75 = math.floor(num_cores * (3/4))
+CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
 
 
 console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
-
-
-
-def profile_worker(dataset_and_sequence):
+def profile_worker(dataset_and_sequence: List[Any]) -> List[Any]:
+    """
+    Worker intened to run in process pool to help profiling
+    """
 
     dataset = dataset_and_sequence[0]
     sequence = dataset_and_sequence[1]
 
-    prog_occurs, non_prog_occurs = byte_search(dataset,
-                                               sequence,
-                                               count_only=True)
+    prog_occurs, non_prog_occurs = byte_search(dataset, sequence, count_only=True)
     return sequence, prog_occurs, non_prog_occurs
+
 
 @app.command()
 def profile_epilogues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the epilogue")],
-    savefile: Annotated[str, typer.Argument(help="File to save to")],
+    length: Annotated[int, typer.Argument(help="Number of bytes for the epilogue")],
+    logfile: Annotated[Path, typer.Argument(help="File to save to")],
     workers: Annotated[int, typer.Argument(help="Number of workers")] = CPU_COUNT_75,
 ):
-    '''
+    """
     Profile the dataset for it's epilogues. Get info about epilogue frequencey,
     whether or not the epilogues occur in other places that are not epilogues.
-    '''
+    """
 
-    savepath = Path(savefile)
-    if savepath.exists():
-        print(f"Path {savepath} already exists")
+    if logfile.exists():
+        print(f"Path {logfile} already exists")
         return
+
     progs = {}
-    files = list(Path(dataset).glob('*'))
+    files = list(Path(dataset.glob("*")))
     for file in alive_it(files):
 
         # Get the functions
@@ -87,7 +82,8 @@ def profile_epilogues(
                 base_index = i + func_start_addrs[address][1] - length
 
                 epilogue = " ".join(
-                    str(hex(x)) for x in text_bytes[base_index:i + length])
+                    str(hex(x)) for x in text_bytes[base_index : i + length]
+                )
                 epilogue = epilogue.strip()
                 if epilogue in progs.keys():
                     progs[epilogue].append((file, address))
@@ -103,7 +99,7 @@ def profile_epilogues(
     with Pool(processes=workers) as pool:
         results = pool.map(profile_worker, chunks)
 
-    for (seq, pro, nonpro) in alive_it(results):
+    for seq, pro, nonpro in alive_it(results):
         if seq in prog_counter.keys():
             prog_counter[seq][0] += pro
             prog_counter[seq][1] += nonpro
@@ -114,8 +110,7 @@ def profile_epilogues(
 
     print(f"Total number of epilogues: {len(progs.keys())}")
 
-
-    start_counter = SequenceCounter(0,0,0,0,0,0)
+    start_counter = SequenceCounter(0, 0, 0, 0, 0, 0)
 
     # Iterate over each sequence, looking it the number of occurance in epilogue,
     # and non-epilogue
@@ -123,25 +118,29 @@ def profile_epilogues(
     for seq, (pro_count, nonpro_count) in prog_counter.items():
 
         if pro_count == 1:
-            start_counter.found_once_in_start+=1
+            start_counter.found_once_in_start += 1
 
         if nonpro_count == 0:
-            start_counter.found_only_in_start+=1
+            start_counter.found_only_in_start += 1
         else:
-            start_counter.found_in_nonstart+=1
+            start_counter.found_in_nonstart += 1
 
-        start_counter.nonstart_occurances+=nonpro_count
-        start_counter.start_occurances+=pro_count
+        start_counter.nonstart_occurances += nonpro_count
+        start_counter.start_occurances += pro_count
 
-    print(f"Number of epilogues that occur else where: {start_counter.found_in_nonstart}")
-    print(f"Number of epilogues that didnot occur else where: {start_counter.found_only_in_start}")
+    print(
+        f"Number of epilogues that occur else where: {start_counter.found_in_nonstart}"
+    )
+    print(
+        f"Number of epilogues that didnot occur else where: {start_counter.found_only_in_start}"
+    )
     print(f"Number of epilogues that are unique: {start_counter.found_once_in_start}")
 
-    prog_counter['dataset'] = dataset
-    prog_counter['seq_len'] = length
-    prog_counter['counts'] = asdict(start_counter)
+    prog_counter["dataset"] = dataset
+    prog_counter["seq_len"] = length
+    prog_counter["counts"] = asdict(start_counter)
 
-    with open(savepath, 'w') as f:
+    with open(logfile, "w") as f:
         json.dump(prog_counter, f)
     return
 
@@ -149,23 +148,21 @@ def profile_epilogues(
 @app.command()
 def profile_prologues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the prologue")],
-    savefile: Annotated[str, typer.Argument(help="File to save to")],
+    length: Annotated[int, typer.Argument(help="Number of bytes for the prologue")],
+    logfile: Annotated[str, typer.Argument(help="File to save to")],
     workers: Annotated[int, typer.Argument(help="Number of workers")] = CPU_COUNT_75,
 ):
-    '''
+    """
     Profile the dataset for it's prologues. Get info about prologue frequencey,
     whether or not the prologues occur in other places that are not prologues.
-    '''
+    """
 
-    savepath = Path(savefile)
-    if savepath.exists():
-        print(f"Path {savepath} already exists")
+    if logfile.exists():
+        print(f"Path {logfile} already exists")
         return
 
     progs = {}
-    files = list(Path(dataset).glob('*'))
+    files = list(Path(dataset).glob("*"))
     for file in alive_it(files):
 
         # Get the functions
@@ -186,8 +183,7 @@ def profile_prologues(
             address = base_address + text_section.virtual_address + i
             if address in func_start_addrs.keys():
 
-                prologue = " ".join(
-                    str(hex(x)) for x in text_bytes[i:i + length])
+                prologue = " ".join(str(hex(x)) for x in text_bytes[i : i + length])
                 prologue = prologue.strip()
                 if prologue in progs.keys():
                     progs[prologue].append((file, address))
@@ -203,7 +199,7 @@ def profile_prologues(
     with Pool(processes=workers) as pool:
         results = pool.map(profile_worker, chunks)
 
-    for (seq, pro, nonpro) in alive_it(results):
+    for seq, pro, nonpro in alive_it(results):
         if seq in prog_counter.keys():
             prog_counter[seq][0] += pro
             prog_counter[seq][1] += nonpro
@@ -214,8 +210,7 @@ def profile_prologues(
 
     print(f"Total number of prologues: {len(progs.keys())}")
 
-
-    start_counter = SequenceCounter(0,0,0,0,0,0)
+    start_counter = SequenceCounter(0, 0, 0, 0, 0, 0)
 
     # Iterate over each sequence, looking it the number of occurance in prologue,
     # and non-prologue
@@ -223,25 +218,29 @@ def profile_prologues(
     for seq, (pro_count, nonpro_count) in prog_counter.items():
 
         if pro_count == 1:
-            start_counter.found_once_in_start+=1
+            start_counter.found_once_in_start += 1
 
         if nonpro_count == 0:
-            start_counter.found_only_in_start+=1
+            start_counter.found_only_in_start += 1
         else:
-            start_counter.found_in_nonstart+=1
+            start_counter.found_in_nonstart += 1
 
-        start_counter.nonstart_occurances+=nonpro_count
-        start_counter.start_occurances+=pro_count
+        start_counter.nonstart_occurances += nonpro_count
+        start_counter.start_occurances += pro_count
 
-    print(f"Number of prologues that occur else where: {start_counter.found_in_nonstart}")
-    print(f"Number of prologues that didnot occur else where: {start_counter.found_only_in_start}")
+    print(
+        f"Number of prologues that occur else where: {start_counter.found_in_nonstart}"
+    )
+    print(
+        f"Number of prologues that didnot occur else where: {start_counter.found_only_in_start}"
+    )
     print(f"Number of prologues that are unique: {start_counter.found_once_in_start}")
 
-    prog_counter['dataset'] = dataset
-    prog_counter['seq_len'] = length
-    prog_counter['counts'] = asdict(start_counter)
+    prog_counter["dataset"] = dataset
+    prog_counter["seq_len"] = length
+    prog_counter["counts"] = asdict(start_counter)
 
-    with open(savepath, 'w') as f:
+    with open(logfile, "w") as f:
         json.dump(prog_counter, f)
     return
 
@@ -249,17 +248,15 @@ def profile_prologues(
 @app.command()
 def top_epilogues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the prologue")],
-    examples: Annotated[int,
-                        typer.Argument(help="Num of head and tail prologues")],
+    length: Annotated[int, typer.Argument(help="Number of bytes for the prologue")],
+    examples: Annotated[int, typer.Argument(help="Num of head and tail prologues")],
 ):
-    '''
+    """
     Find Common prologues
-    '''
+    """
 
     if Path(dataset).is_dir():
-        files = list(Path(dataset).glob('*'))
+        files = list(Path(dataset).glob("*"))
     elif Path(dataset).is_file():
         files = [Path(dataset)]
     else:
@@ -293,10 +290,7 @@ def top_epilogues(
         base_address = bin.imagebase
 
         func_start_addrs = {x.addr: (x.name, x.size) for x in functions}
-        func_end_addrs = {
-            x.addr + x.size: (x.name, x.size, x.addr)
-            for x in functions
-        }
+        func_end_addrs = {x.addr + x.size: (x.name, x.size, x.addr) for x in functions}
 
         # Want to count the number of times a prolog accors and in what file
         # and address it occurs in
@@ -306,33 +300,45 @@ def top_epilogues(
 
             # The end address need to be the last byte
             address = base_address + text_section.virtual_address + i
-            #if address in func_start_addrs.keys():
+            # if address in func_start_addrs.keys():
             if address + length in func_end_addrs.keys():
-                key = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
+                key = " ".join(str(hex(x)) for x in text_bytes[i : i + length])
                 key = key.strip()
                 if key in prologues.keys():
                     prologues[key] += 1
-                    #addrs[key].append((address,file))
+                    # addrs[key].append((address,file))
                     addrs[key].append(address)
                     file_names[key].append(
-                        (file.name, address,
-                         func_end_addrs[address + length][2],
-                         address + length))
+                        (
+                            file.name,
+                            address,
+                            func_end_addrs[address + length][2],
+                            address + length,
+                        )
+                    )
                 else:
                     prologues[key] = 1
-                    #addrs[key] = [(address,file)]
+                    # addrs[key] = [(address,file)]
                     addrs[key] = [(address)]
-                    file_names[key] = [((file.name, address,
-                                         func_end_addrs[address + length][2],
-                                         address + length))]
+                    file_names[key] = [
+                        (
+                            (
+                                file.name,
+                                address,
+                                func_end_addrs[address + length][2],
+                                address + length,
+                            )
+                        )
+                    ]
 
                 # BUG: This was not working, I was unable to correctly diasm
                 # Want to get the disasmable of a key
-                #disams[key] = disasm_at(file, address, length)
-                #disams[key] = disasm_with(file, address, length, file_disasm)
+                # disams[key] = disasm_at(file, address, length)
+                # disams[key] = disasm_with(file, address, length, file_disasm)
 
     most_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=True))
+        sorted(prologues.items(), key=lambda item: item[1], reverse=True)
+    )
     print(f"Max occurances: {max(prologues.values())}")
 
     count = 0
@@ -348,22 +354,22 @@ def top_epilogues(
         # sense for shorter prologues (however in the same breath, shorter
         # prologues don't make much sense unless they make atleast a whole
         # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
+        # res =  disasm_bytes(files[0], key.encode())
 
         ## See the below for how the bytes_string is created, this does that
         ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+        # max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
 
         ## Format each byte in the res nicely
-        #for thing in res:
+        # for thing in res:
         #    byte_ar = thing.bytes
         #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
         #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
 
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
+        # print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
         # Turn the key into the disasm
 
-        #print(f"Disam: {disams[key]}")
+        # print(f"Disam: {disams[key]}")
         count += 1
         if count > examples:
             print(f"Total unique funcs {len(prologues.values())}")
@@ -371,7 +377,8 @@ def top_epilogues(
             break
 
     least_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=False))
+        sorted(prologues.items(), key=lambda item: item[1], reverse=False)
+    )
     # Least common
     print("Least common prologues...")
     count = 0
@@ -385,22 +392,22 @@ def top_epilogues(
         # sense for shorter prologues (however in the same breath, shorter
         # prologues don't make much sense unless they make atleast a whole
         # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
+        # res =  disasm_bytes(files[0], key.encode())
 
         ## See the below for how the bytes_string is created, this does that
         ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+        # max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
 
         ## Format each byte in the res nicely
-        #for thing in res:
+        # for thing in res:
         #    byte_ar = thing.bytes
         #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
         #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
 
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
+        # print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
         # Turn the key into the disasm
 
-        #print(f"Disam: {disams[key]}")
+        # print(f"Disam: {disams[key]}")
         count += 1
         if count > examples:
             print(f"Total unique funcs {len(prologues.values())}")
@@ -409,21 +416,19 @@ def top_epilogues(
     return
 
 
-#TODO: Parallelize this. Also get the disasm working
+# TODO: Parallelize this. Also get the disasm working
 @app.command()
 def top_prologues(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
-    length: Annotated[int,
-                      typer.Argument(help="Number of bytes for the prologue")],
-    examples: Annotated[int,
-                        typer.Argument(help="Num of head and tail prologues")],
+    length: Annotated[int, typer.Argument(help="Number of bytes for the prologue")],
+    examples: Annotated[int, typer.Argument(help="Num of head and tail prologues")],
 ):
-    '''
+    """
     Find Common prologues
-    '''
+    """
 
     if Path(dataset).is_dir():
-        files = list(Path(dataset).glob('*'))
+        files = list(Path(dataset).glob("*"))
     elif Path(dataset).is_file():
         files = [Path(dataset)]
     else:
@@ -465,26 +470,27 @@ def top_prologues(
         for i, _ in enumerate(text_bytes):
             address = base_address + text_section.virtual_address + i
             if address in func_start_addrs.keys():
-                key = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
+                key = " ".join(str(hex(x)) for x in text_bytes[i : i + length])
                 key = key.strip()
                 if key in prologues.keys():
                     prologues[key] += 1
-                    #addrs[key].append((address,file))
+                    # addrs[key].append((address,file))
                     addrs[key].append(address)
                     file_names[key].append((file.name, address))
                 else:
                     prologues[key] = 1
-                    #addrs[key] = [(address,file)]
+                    # addrs[key] = [(address,file)]
                     addrs[key] = [(address)]
                     file_names[key] = [(file.name, address)]
 
                 # BUG: This was not working, I was unable to correctly diasm
                 # Want to get the disasmable of a key
-                #disams[key] = disasm_at(file, address, length)
-                #disams[key] = disasm_with(file, address, length, file_disasm)
+                # disams[key] = disasm_at(file, address, length)
+                # disams[key] = disasm_with(file, address, length, file_disasm)
 
     most_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=True))
+        sorted(prologues.items(), key=lambda item: item[1], reverse=True)
+    )
     print(f"Max occurances: {max(prologues.values())}")
 
     count = 0
@@ -500,22 +506,22 @@ def top_prologues(
         # sense for shorter prologues (however in the same breath, shorter
         # prologues don't make much sense unless they make atleast a whole
         # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
+        # res =  disasm_bytes(files[0], key.encode())
 
         ## See the below for how the bytes_string is created, this does that
         ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+        # max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
 
         ## Format each byte in the res nicely
-        #for thing in res:
+        # for thing in res:
         #    byte_ar = thing.bytes
         #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
         #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
 
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
+        # print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
         # Turn the key into the disasm
 
-        #print(f"Disam: {disams[key]}")
+        # print(f"Disam: {disams[key]}")
         count += 1
         if count > examples:
             print(f"Total unique funcs {len(prologues.values())}")
@@ -523,7 +529,8 @@ def top_prologues(
             break
 
     least_common = dict(
-        sorted(prologues.items(), key=lambda item: item[1], reverse=False))
+        sorted(prologues.items(), key=lambda item: item[1], reverse=False)
+    )
     # Least common
     print("Least common prologues...")
     count = 0
@@ -537,22 +544,22 @@ def top_prologues(
         # sense for shorter prologues (however in the same breath, shorter
         # prologues don't make much sense unless they make atleast a whole
         # instruction)
-        #res =  disasm_bytes(files[0], key.encode())
+        # res =  disasm_bytes(files[0], key.encode())
 
         ## See the below for how the bytes_string is created, this does that
         ## but finds the longest one so I can format the output string nicely
-        #max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
+        # max_len = max(len(' '.join([f'{b:02x}' for b in x.bytes ])) for x in res)
 
         ## Format each byte in the res nicely
-        #for thing in res:
+        # for thing in res:
         #    byte_ar = thing.bytes
         #    bytes_string = ' '.join([f'{b:02x}' for b in byte_ar])
         #    print(f"0x{thing.address:x}: {bytes_string:<{max_len}} {thing.mnemonic} {thing.op_str}")
 
-        #print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
+        # print(f"Disass:\n{[str(disasm_bytes(files[0], key.encode())}")
         # Turn the key into the disasm
 
-        #print(f"Disam: {disams[key]}")
+        # print(f"Disam: {disams[key]}")
         count += 1
         if count > examples:
             print(f"Total unique funcs {len(prologues.values())}")
@@ -562,13 +569,13 @@ def top_prologues(
 
 
 def byte_search(dataset, input_seq, count_only=False):
-    '''
-    Search the dataset for the byte sting. 
-    '''
+    """
+    Search the dataset for the byte sting.
+    """
 
     if Path(dataset).is_dir():
         # Get the files
-        files = list(Path(dataset).glob('*'))
+        files = list(Path(dataset).glob("*"))
     elif Path(dataset).is_file():
         files = [Path(dataset)]
     else:
@@ -583,13 +590,10 @@ def byte_search(dataset, input_seq, count_only=False):
     prog_occurs = 1
     non_prog_occurs = 0
 
-    #for file in alive_it(files):
+    # for file in alive_it(files):
     for file in files:
         # get the start addrs
-        func_start_addrs = {
-            x.addr: (x.name, x.size)
-            for x in get_functions(file)
-        }
+        func_start_addrs = {x.addr: (x.name, x.size) for x in get_functions(file)}
 
         bin = lief.parse(str(file.resolve()))
         text_section = bin.get_section(".text")
@@ -607,7 +611,7 @@ def byte_search(dataset, input_seq, count_only=False):
             if i + length > len(text_bytes) + 1:
                 break
 
-            sub_seq = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
+            sub_seq = " ".join(str(hex(x)) for x in text_bytes[i : i + length])
 
             if sub_seq == input_seq:
                 if address in func_start_addrs.keys():
@@ -629,18 +633,18 @@ def byte_search(dataset, input_seq, count_only=False):
 @app.command()
 def search_for_bytes(
     dataset: Annotated[str, typer.Argument(help="The dataset")],
-    input_seq: Annotated[str,
-                         typer.Argument(
-                             help="Bytes in format: 0x<byte1> 0x<byte2> ")],
+    input_seq: Annotated[
+        str, typer.Argument(help="Bytes in format: 0x<byte1> 0x<byte2> ")
+    ],
     save_to_files: Annotated[bool, typer.Option()] = False,
 ):
-    '''
-    Search the dataset for the byte sting. 
-    '''
+    """
+    Search the dataset for the byte sting.
+    """
 
     if Path(dataset).is_dir():
         # Get the files
-        files = list(Path(dataset).glob('*'))
+        files = list(Path(dataset).glob("*"))
     elif Path(dataset).is_file():
         files = [Path(dataset)]
     else:
@@ -655,10 +659,7 @@ def search_for_bytes(
     for file in alive_it(files):
 
         # get the start addrs
-        func_start_addrs = {
-            x.addr: (x.name, x.size)
-            for x in get_functions(file)
-        }
+        func_start_addrs = {x.addr: (x.name, x.size) for x in get_functions(file)}
 
         bin = lief.parse(str(file.resolve()))
         text_section = bin.get_section(".text")
@@ -676,7 +677,7 @@ def search_for_bytes(
             if i + length > len(text_bytes) + 1:
                 break
 
-            sub_seq = " ".join(str(hex(x)) for x in text_bytes[i:i + length])
+            sub_seq = " ".join(str(hex(x)) for x in text_bytes[i : i + length])
 
             if sub_seq == input_seq:
                 if address in func_start_addrs.keys():
@@ -684,9 +685,9 @@ def search_for_bytes(
                 else:
                     non_pro_occurances.append((address, file))
 
-    #print("Done searching")
+    # print("Done searching")
 
-    #with open("NON_PRO_OCCURNACE", 'w') as f:
+    # with open("NON_PRO_OCCURNACE", 'w') as f:
     #    for (addr, file) in non_pro_occurances:
     #        f.write(f"{file} ||||| {hex(addr)}\n")
 
@@ -701,22 +702,23 @@ def search_for_bytes(
         )
 
     if save_to_files:
-        with open("_PROLOGUES", 'w') as f:
-            for (addr, file) in prologue_occurances:
+        with open("_PROLOGUES", "w") as f:
+            for addr, file in prologue_occurances:
                 f.write(f"{file}, {hex(addr)}\n")
 
-        with open("NON_PROLOGUES", 'w') as f:
-            for (addr, file) in non_pro_occurances:
+        with open("NON_PROLOGUES", "w") as f:
+            for addr, file in non_pro_occurances:
                 f.write(f"{file}, {hex(addr)}\n")
     return
 
 
 @app.command()
-def get_function_list(binary: Annotated[str,
-                                        typer.Argument(help="Binary File")], ):
-    '''
+def get_function_list(
+    binary: Annotated[str, typer.Argument(help="Binary File")],
+):
+    """
     Get list of functions
-    '''
+    """
 
     bin = Path(binary)
 
@@ -731,14 +733,12 @@ def get_function_list(binary: Annotated[str,
 @app.command()
 def get_function(
     binary: Annotated[str, typer.Argument(help="Binary File")],
-    name_like: Annotated[str,
-                         typer.Option(help="Substring of function name")] = "",
-    name_exact: Annotated[str,
-                          typer.Option(help="The exact function name")] = "",
+    name_like: Annotated[str, typer.Option(help="Substring of function name")] = "",
+    name_exact: Annotated[str, typer.Option(help="The exact function name")] = "",
 ):
-    '''
-    Get information on the given function in the binary 
-    '''
+    """
+    Get information on the given function in the binary
+    """
 
     exact = False
     like = False
@@ -787,8 +787,7 @@ def get_function(
     # Need to apply the offset to get the correct addr:
     # correct addr = cur_byte_index + base_image_addr + text_sec_addr
     offset = base_address + text_section.virtual_address
-    blist = text_bytes[func_info[0] - offset:func_info[0] - offset +
-                       func_info[2]]
+    blist = text_bytes[func_info[0] - offset : func_info[0] - offset + func_info[2]]
 
     hex_repr = " ".join(str(hex(x)) for x in blist)
     print(f"HEX REPR:\n {hex_repr}")

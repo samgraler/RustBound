@@ -16,10 +16,10 @@ import pandas as pd
 from pathlib import Path
 
 
-# LIEF reports length 
+# LIEF reports length
 # IDA reports length
 # Ghidra kind of reports length
-# 
+#
 # These lenghs will be used to define an end address
 # end = start_addr + length - 1
 
@@ -27,10 +27,10 @@ from pathlib import Path
 # BiRNN reports prediction per byte
 
 
-
 class AnalysisType(Enum):
     ONEHOT_PLUS_FUNC_LABELS = "onehot_plus_func_labels"
-    DEC_REPR_BYTE_PLUS_FUNC_LABELS = 'dec_repr_byte_plus_func_labels'
+    DEC_REPR_BYTE_PLUS_FUNC_LABELS = "dec_repr_byte_plus_func_labels"
+
 
 class Coptimization(Enum):
     O0 = "0"
@@ -38,8 +38,10 @@ class Coptimization(Enum):
     O2 = "2"
     O3 = "3"
 
+
 class GoOptimization(Enum):
     DEFAULT = "default"
+
 
 class RustcOptimization(Enum):
     O0 = "0"
@@ -49,23 +51,28 @@ class RustcOptimization(Enum):
     OS = "s"
     OZ = "z"
 
-@dataclass 
-class FunctionInfo():
+
+@dataclass
+class FunctionInfo:
     name: str
     addr: int
     addrHex: str
     size: int
 
+
 @dataclass
-class binaryFileExecSectionOnly():
-    ''' Represents a  file '''
+class binaryFileExecSectionOnly:
+    """Represents a  file"""
+
     name: str
     stripped: bool
     compile_cmd: str
     bytes: pd.DataFrame
 
+
 class FileType(Enum):
-    ''' File type enums '''
+    """File type enums"""
+
     # @TODO: Add MACH-0 support
     # @TODO: NOTICE: lief has its own file types but doesn't differenciate
     #         64bit and 32bit
@@ -73,6 +80,7 @@ class FileType(Enum):
     PE_X86_64 = "pe_x86_64"
     ELF_X86 = "elf_x86"
     ELF_X86_64 = "elf_x86_64"
+
 
 class Compiler(Enum):
     ICC = "icc"
@@ -82,48 +90,52 @@ class Compiler(Enum):
     CLANG = "clang"
     MSVC = "msvc"
 
+
 class ProgLang(Enum):
     C = "c"
     RUST = "rust"
     GO = "go"
 
-@dataclass 
-class ByteInfo():
+
+@dataclass
+class ByteInfo:
     byte: int
     hexByte: str
-    #oneHotEncodedByte: list[int]
+    # oneHotEncodedByte: list[int]
     address: int
     hexStrAddress: str
     functionStart: bool
     functionEnd: bool
     functionMiddle: bool
-    #fileName: Path
+    # fileName: Path
     fileName: str
 
+
 @dataclass
-class KnownByteInfo_verbose_sql():
+class KnownByteInfo_verbose_sql:
     # Byte things
     byte: int
     hexStrByte: str
-    #oneHotEncodedByte: list[int]
+    # oneHotEncodedByte: list[int]
     address: int
     hexStrAddress: str
     funcStart: bool
     funcEnd: bool
     funcMiddle: bool
-    # File thins 
-    fileName: str #Path
-    fileType: str #FileType
+    # File thins
+    fileName: str  # Path
+    fileType: str  # FileType
     # File generation things
-    compiler: str #Compiler
-    progLan: str #ProgLang
-    optimization: str #Optimization
+    compiler: str  # Compiler
+    progLan: str  # ProgLang
+    optimization: str  # Optimization
     is_stripped: bool
-    os_arch : str    #TODO Probably be good to make an enum for this 
-    compile_cmd : str
- 
+    os_arch: str  # TODO Probably be good to make an enum for this
+    compile_cmd: str
+
+
 @dataclass
-class KnownByteInfo_verbose():
+class KnownByteInfo_verbose:
     # Byte things
     byte: int
     hexStrByte: str
@@ -133,28 +145,30 @@ class KnownByteInfo_verbose():
     funcStart: bool
     funcEnd: bool
     funcMiddle: bool
-    # File thins 
+    # File thins
     fileName: Path
     fileType: FileType
     # File generation things
     compiler: Compiler
     progLan: ProgLang
-    optimization:  RustcOptimization
+    optimization: RustcOptimization
     is_stripped: bool
-    os_arch : str    #TODO Probably be good to make an enum for this 
-    compile_cmd : str
-                    #      too
+    os_arch: str  # TODO Probably be good to make an enum for this
+    compile_cmd: str
+    #      too
+
 
 class RustcStripFlags(Enum):
-    """ 
-    This is a flag meant to be passed to 
+    """
+    This is a flag meant to be passed to
     CargoVariables.RUSTC_FLAGS
     """
-    # NOTICE: Only one flag can be passed to 
+
+    # NOTICE: Only one flag can be passed to
     # CARGO_ENCODED_RUSTFLAGS...
-    # They remove the RUSTFLAGS environment variable 
+    # They remove the RUSTFLAGS environment variable
     # in favor of this one that encodes the flags...
-    # however I could not find a way to change multiple 
+    # however I could not find a way to change multiple
     # flags together
     NOSTRIP = "-Cstrip=none"
     DEBUG_INFO = "-Cstrip=debug"
@@ -162,13 +176,13 @@ class RustcStripFlags(Enum):
 
 
 class CargoVariables(Enum):
-    ''' 
+    """
     These are the means to provided the build flags, via env vars
-    '''
+    """
+
     RUSTC_FLAGS = "CARGO_ENCODED_RUSTFLAGS"
     DEV_PROF_SET_OPT_LEVEL = "CARGO_PROFILE_DEV_OPT_LEVEL"
     RELEASE_PROF_SET_OPT_LEVEL = "CARGO_PROFILE_RELEASE_OPT_LEVEL"
-
 
 
 class RustcTarget(Enum):
@@ -373,5 +387,3 @@ class RustcTarget(Enum):
     X86_64_UWP_WINDOWS_GNU = "x86_64-uwp-windows-gnu"
     X86_64_UWP_WINDOWS_MSVC = "x86_64-uwp-windows-msvc"
     X86_64_WRS_VXWORKS = "x86_64-wrs-vxworks"
-
-

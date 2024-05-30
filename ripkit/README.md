@@ -170,6 +170,13 @@ For a list of commands, use `python ripkit/main.py --help`
 
 Additionally, individual commands will also accept the --help flag for usage information
 
+## Docs
+
+mkdocs is used for documentation. Currently you must serve them youself:
+```
+mkdocs serve -a 0.0.0.0:8000
+```
+Docs will then be at http://0.0.0.0:8000
 ## Roadmap...
 
 

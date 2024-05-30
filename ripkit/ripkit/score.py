@@ -1,11 +1,10 @@
-'''
+"""
 Moving the functionality of scoring Ghidra and IDA to here so that I 
 never again have two implementations for the same thing... that end up 
 not being the same :)) 
 
 Later will see about scoring NN here too 
-'''
-
+"""
 
 import numpy as np
 import sys
@@ -14,57 +13,61 @@ from ripkit.ripbin import (
     lief_gnd_truth,
     ConfusionMatrix,
 )
-ripkit_dir = Path("../ripkit").resolve()
-sys.path.append (
-    str(ripkit_dir)
-)
 
-def get_address_len_gnd(bin:Path):
-    '''
-    Given an unstripped input binary, generate the 
+ripkit_dir = Path("../ripkit").resolve()
+sys.path.append(str(ripkit_dir))
+
+
+def get_address_len_gnd(bin: Path):
+    """
+    Given an unstripped input binary, generate the
     gnd truth matrix with addresses and lengths as column
-    '''
+    """
     # 1  - Ground truth for bin file, func addr, len
     gnd_truth = lief_gnd_truth(bin.resolve())
 
-    gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-                                    gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+    gnd_matrix = np.concatenate(
+        (gnd_truth.func_addrs.T.reshape(-1, 1), gnd_truth.func_lens.T.reshape(-1, 1)),
+        axis=1,
+    )
 
     return gnd_truth, gnd_matrix
 
-def gnd_truth_start_plus_len(bin:Path):
-    '''
-    Generate the ground truth for the givne binary file
-    '''
 
-    # Load the groud truth from lief 
+def gnd_truth_start_plus_len(bin: Path):
+    """
+    Generate the ground truth for the givne binary file
+    """
+
+    # Load the groud truth from lief
     gnd_truth = lief_gnd_truth(bin.resolve())
 
     # Reshape the ground truth so that we have a matrix with 2 columns:
     #   | start_addr | func_len |
     #     .. ...     | .. ...
-    gnd = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
-                            gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
+    gnd = np.concatenate(
+        (gnd_truth.func_addrs.T.reshape(-1, 1), gnd_truth.func_lens.T.reshape(-1, 1)),
+        axis=1,
+    )
     return gnd_truth, gnd
 
 
-
 def find_offset(lief_addrs, ghidra_addrs):
-    '''
-    Ghidra adds an offset to it's addrs, this function 
+    """
+    Ghidra adds an offset to it's addrs, this function
     finds that offset
-    '''
+    """
 
     # The idea here is to...
-    # 1. Find the space (in bytes) between all the functions 
+    # 1. Find the space (in bytes) between all the functions
     # 2. Make a list of tuples of:
     #       (function_start_address, bytes_til_next_function)
 
-    # Once we have this we can try to "slide" the function 
+    # Once we have this we can try to "slide" the function
     #  addresses until the two lists of bytes_til_next match
 
-    ghid_addr_bnext =  append_bnext(ghidra_addrs)
-    lief_addrs =  append_bnext(lief_addrs)
+    ghid_addr_bnext = append_bnext(ghidra_addrs)
+    lief_addrs = append_bnext(lief_addrs)
 
     offset = 0
     found_offset = False
@@ -79,10 +82,11 @@ def find_offset(lief_addrs, ghidra_addrs):
                 return offset
     return offset
 
+
 def append_bnext(inp_list):
     """
-    given a list integers, calculate the distane 
-    until the next integer. 
+    given a list integers, calculate the distane
+    until the next integer.
 
     Make a tuple of (integer, till_next_int)
     """
@@ -92,7 +96,7 @@ def append_bnext(inp_list):
     # Generate a list of addrs and the # bytes till the next addr
     for i, fun in enumerate(inp_list):
         if i < len(inp_list) - 1:
-            to_next = int(inp_list[i+1]) - int(inp_list[i])
+            to_next = int(inp_list[i + 1]) - int(inp_list[i])
         else:
             to_next = 0
         new_list.append((fun, to_next))
@@ -100,55 +104,57 @@ def append_bnext(inp_list):
     return new_list
 
 
-def load_ida_prediction(prediction_file: Path)->np.ndarray:
-    '''
+def load_ida_prediction(prediction_file: Path) -> np.ndarray:
+    """
     Load the IDA npz file
-    '''
+    """
     return load_npz(prediction_file)
 
-# TODO: Is an npz really less size than npy is there's 
+
+# TODO: Is an npz really less size than npy is there's
 #       only one array?
-def load_npz(inp: Path)->np.ndarray:
-    '''
+def load_npz(inp: Path) -> np.ndarray:
+    """
     Read the npz, expected to have a single file
-    '''
+    """
     npz_file = np.load(inp)
     return npz_file[list(npz_file.keys())[0]].astype(int)
 
 
-def load_ghidra_prediction(prediction_file: Path, gnd: np.ndarray)->np.ndarray:
-    '''
+def load_ghidra_prediction(prediction_file: Path, gnd: np.ndarray) -> np.ndarray:
+    """
     Load the Ghidra npz file
-    '''
+    """
 
     # 1 - Load the file
     prediction = load_npz(prediction_file)
 
     # 3 - Apply the offset to the ghidra funcs
-    offset = find_offset(sorted(gnd[:,0].tolist()), 
-                             sorted((prediction[:,0].tolist())))
+    offset = find_offset(
+        sorted(gnd[:, 0].tolist()), sorted((prediction[:, 0].tolist()))
+    )
 
     # Apply the offset to all of the addresses
-    prediction[:,0] += offset
+    prediction[:, 0] += offset
     return prediction
 
 
-def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray, 
-                         min_addr: int, 
-                         max_addr: int)-> tuple[ConfusionMatrix,ConfusionMatrix,ConfusionMatrix]:
-    '''
+def score_start_plus_len(
+    gnd: np.ndarray, prediction: np.ndarray, min_addr: int, max_addr: int
+) -> tuple[ConfusionMatrix, ConfusionMatrix, ConfusionMatrix]:
+    """
     Score prediction NPY and NPZ of the given file
-    '''
+    """
 
-    start_conf = ConfusionMatrix(0,0,0,0)
-    end_conf = ConfusionMatrix(0,0,0,0)
-    bound_conf = ConfusionMatrix(0,0,0,0)
+    start_conf = ConfusionMatrix(0, 0, 0, 0)
+    end_conf = ConfusionMatrix(0, 0, 0, 0)
+    bound_conf = ConfusionMatrix(0, 0, 0, 0)
 
-    # 1. Mask the prediction array so that we only consider functions in the 
+    # 1. Mask the prediction array so that we only consider functions in the
     #       .text section
     # TODO: The below line using the min and max addr of the text section.
     #       Using the below line:
-    #           - tp decrease 
+    #           - tp decrease
     #           - fp increase
     #           - fn increase
     #       FN should not have increased
@@ -157,14 +163,15 @@ def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray,
     #       With TP inc and TP decreaing I suspect that the min and max addrs
     #       are slighlty incorrect -- I will stick with np.max and min for now
     #       There is a marginal difference in the final values for a testset
-    #       of roughly 200 files (0.0001 difference of F1) 
+    #       of roughly 200 files (0.0001 difference of F1)
     #
-    #mask = ((prediction[:,0]  < max_addr) & (prediction[:,0] >  min_addr))
+    # mask = ((prediction[:,0]  < max_addr) & (prediction[:,0] >  min_addr))
     #
     # Create the mask
-    mask = ((prediction[:,0]  <= np.max(gnd[:,0])) & 
-            (prediction[:,0] >=  np.min(gnd[:,0])))
-    #print(f"Mask uses min {np.min(gnd[:,0])} and max {np.max(gnd[:,0])}")
+    mask = (prediction[:, 0] <= np.max(gnd[:, 0])) & (
+        prediction[:, 0] >= np.min(gnd[:, 0])
+    )
+    # print(f"Mask uses min {np.min(gnd[:,0])} and max {np.max(gnd[:,0])}")
 
     # Apply the mask
     filt_prediction = prediction[mask]
@@ -172,15 +179,15 @@ def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray,
     # 3 - Compare the two lists
 
     # 3.1 - Function start stats
-    start_conf.tp=len(np.intersect1d(gnd[:,0], filt_prediction[:,0]))
+    start_conf.tp = len(np.intersect1d(gnd[:, 0], filt_prediction[:, 0]))
     start_conf.fp = filt_prediction.shape[0] - start_conf.tp
     start_conf.fn = gnd.shape[0] - start_conf.tp
 
     # 3.2 - Function end stats
     # -- For ghidra and IDA, we do not predict ends. Rather lengths.
     # -- Therefore, see if start+len is in ends
-    pred_end_addresses = filt_prediction[:,0]  + filt_prediction[:,1]
-    gnd_end_addresses = gnd[:,0]  + gnd[:,1]
+    pred_end_addresses = filt_prediction[:, 0] + filt_prediction[:, 1]
+    gnd_end_addresses = gnd[:, 0] + gnd[:, 1]
 
     end_conf.tp = len(np.intersect1d(gnd_end_addresses, pred_end_addresses))
     end_conf.fp = pred_end_addresses.shape[0] - end_conf.tp
@@ -191,72 +198,68 @@ def score_start_plus_len(gnd: np.ndarray, prediction: np.ndarray,
     # FP = Total number of functions in pred - tp
     # FN = Total number of functions in ground - tp
     for row in filt_prediction:
-        if np.any(np.all(row == gnd, axis=1)): 
-            bound_conf.tp+=1
+        if np.any(np.all(row == gnd, axis=1)):
+            bound_conf.tp += 1
     bound_conf.fp = filt_prediction.shape[0] - bound_conf.tp
     bound_conf.fn = gnd.shape[0] - bound_conf.tp
 
     return start_conf, end_conf, bound_conf
 
 
-def analyze_distances(gnd:np.ndarray, pred:np.ndarray):
-    '''
+def analyze_distances(gnd: np.ndarray, pred: np.ndarray):
+    """
     Analyze the distances between prediction label location and the truth
 
     NOTICE: distance is: predicted_byte_addr - nearest_gnd_addr
 
     Input matrices MUST be 2columns by x rows. Col0 = start addr, Col1 = end addr
-    '''
+    """
 
-    # Save the distance of end distances here 
-    end_distances = np.empty_like(pred[:,1], dtype=pred.dtype)
+    # Save the distance of end distances here
+    end_distances = np.empty_like(pred[:, 1], dtype=pred.dtype)
     # Iterate over prediction, and find the nearest address in the gnd prediction
-    for i, addr in enumerate(pred[:,1].tolist()):
-        min_index = np.argmin(np.abs(gnd[:,1]-addr))
-        end_distances[i]  = gnd[min_index,1]  - addr
+    for i, addr in enumerate(pred[:, 1].tolist()):
+        min_index = np.argmin(np.abs(gnd[:, 1] - addr))
+        end_distances[i] = gnd[min_index, 1] - addr
 
-    ends_tp = np.count_nonzero(end_distances==0)
+    ends_tp = np.count_nonzero(end_distances == 0)
     print(f"Ends TP: {ends_tp}")
 
-
-
-    # Save the distance of start distances here 
-    start_distances = np.empty_like(pred[:,0], dtype=pred.dtype)
+    # Save the distance of start distances here
+    start_distances = np.empty_like(pred[:, 0], dtype=pred.dtype)
     # Iterate over prediction, and find the nearest address in the gnd prediction
-    for i, addr in enumerate(pred[:,0].tolist()):
-        min_index = np.argmin(np.abs(gnd[:,0]-addr))
-        start_distances[i]  = gnd[min_index,0] - addr
+    for i, addr in enumerate(pred[:, 0].tolist()):
+        min_index = np.argmin(np.abs(gnd[:, 0] - addr))
+        start_distances[i] = gnd[min_index, 0] - addr
 
-    starts_tp = np.count_nonzero(start_distances==0)
+    starts_tp = np.count_nonzero(start_distances == 0)
     print(f"Starts TP: {starts_tp}")
 
-    #TODO: Bounds is buggy, getting way more misses than I should be 
-    # Save the combined distance here 
+    # TODO: Bounds is buggy, getting way more misses than I should be
+    # Save the combined distance here
     bound_distances = np.empty_like(pred, dtype=pred.dtype)
-    bound_tp=0
+    bound_tp = 0
 
     # The nearest gnd turth is now where (delta(start) + delta(end)) is minimized
-    for i, (start,end) in enumerate(pred):
+    for i, (start, end) in enumerate(pred):
         # Distance is: gnd_start - pred_start + gnd_end - pred_end
 
-        # Subtract the current start from every gnd start values 
-        start_delts = gnd[:,0] - start
+        # Subtract the current start from every gnd start values
+        start_delts = gnd[:, 0] - start
 
-        # Same for ends 
-        end_delts = gnd[:,1] - end
+        # Same for ends
+        end_delts = gnd[:, 1] - end
 
         # Element wise addition
         total_delts = start_delts + end_delts
 
-        min_index = np.argmin(np.abs(total_delts ))
+        min_index = np.argmin(np.abs(total_delts))
 
-        bound_distances[i,0] = gnd[min_index,0] - start
-        bound_distances[i,1] = gnd[min_index,1] - end
-        if bound_distances[i,0] == 0 and  bound_distances[i,1]==0:
-            bound_tp+=1
+        bound_distances[i, 0] = gnd[min_index, 0] - start
+        bound_distances[i, 1] = gnd[min_index, 1] - end
+        if bound_distances[i, 0] == 0 and bound_distances[i, 1] == 0:
+            bound_tp += 1
 
     print(f"Bounds TP: {bound_tp}")
 
     return start_distances, end_distances, bound_distances
-
-
