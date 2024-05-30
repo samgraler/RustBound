@@ -217,7 +217,6 @@ def is_executable(path: Path) -> bool:
         return False
 
     if not hasattr(bin, "format"):
-        print(f"Path {path} has not attr format")
         return False
     elif bin.format in [
         lief.EXE_FORMATS.PE,
@@ -225,10 +224,8 @@ def is_executable(path: Path) -> bool:
         lief.EXE_FORMATS.MACHO,
         lief.EXE_FORMATS.UNKNOWN,
     ]:
-        print(f"Path is exe {path} with format {bin.format}")
         return True
     else:
-        print(f"Path {path} has unknown format {bin.format}")
         return False
 
 
