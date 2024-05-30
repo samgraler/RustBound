@@ -118,7 +118,6 @@ def build_crate(
     if not crate_path.exists():
         raise Exception(f"Crate {crate} has not been cloned")
     try:
-        print(f"COMMAND : {cmd}")
         subprocess.check_output(cmd, shell=True, 
                                 stderr=subprocess.DEVNULL
                                 )
