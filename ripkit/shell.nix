@@ -19,11 +19,7 @@ pkgs.mkShell {
     pkgs.python311Packages.pandas
     pkgs.python311Packages.scipy
     pkgs.cargo-cross
+    pkgs.cargo
     pkgs.podman
   ];
 }
-
-
-
-
-
