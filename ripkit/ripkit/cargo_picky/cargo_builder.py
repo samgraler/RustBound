@@ -66,33 +66,35 @@ def gen_cross_build_cmd(
     attack: Optional[CompileTimeAttacks] = None,
     force_podman: bool = False,
 ):
-    # First build the environment variables,
-    # the CARGO_ENCODED_RUSTC_FLAGS -otherwise called-
-    #   CargoVariables.RUSTC_FLAGS
-    # Is being used to strip or not strip
-    #
-    # And CARGO_PROFILE_DEV_OPT_LEVEL -otherwise called-
-    #   CargoVariables.DEV_PROF_SET_OPT_LEVEL
-    # Is being used to set the optimizaition level
-    substrs = []
+    '''
+    Generate the build command for cross
+    '''
+
+    substrs = [ f"cd {proj_path} &&"  ]
+
     if strip_cmd is not None:
-        substrs.append(f"{CargoVariables.RUSTC_FLAGS.value}='{strip_cmd.value}'")
+        # Make the strip environment variable
+        substrs.append(f" {CargoVariables.RUSTC_FLAGS.value}='{strip_cmd.value}' ")
+
     if opt_lvl is not None:
+        # Make the opt_lvl environ variable
         substrs.append(
-            f" {CargoVariables.DEV_PROF_SET_OPT_LEVEL.value}={opt_lvl.value}"
+            f" {CargoVariables.DEV_PROF_SET_OPT_LEVEL.value}={opt_lvl.value} "
         )
+
     if attack is not None:
-        substrs.append(f"RUSTFLAGS='-C {attack.value}'")
+        # TODO: In the future an attack could be a rustcflag,
+        # add these to the list
+        substrs.append(f" RUSTFLAGS='-C {attack.value}' ")
 
+    # Add the variable to force podman usage
     if force_podman:
-        substrs.append(
-            f"cd {proj_path} && CROSS_CONTAINER_ENGINE=podman cross build --target={target.value}"
-        )
-    else:
-        substrs.append(f"cd {proj_path} && cross build --target={target.value}")
+        substrs.append(" CROSS_CONTAINER_ENGINE=podman ")
 
-    full_build_str = " ".join(x for x in substrs)
-    return full_build_str
+    # lastly add the command to actually build
+    substrs.append(f"cross build --target={target.value}")
+
+    return " ".join(x for x in substrs)
 
 
 def build_crate(
