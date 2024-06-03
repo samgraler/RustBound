@@ -66,33 +66,35 @@ def gen_cross_build_cmd(
     attack: Optional[CompileTimeAttacks] = None,
     force_podman: bool = False,
 ):
-    # First build the environment variables,
-    # the CARGO_ENCODED_RUSTC_FLAGS -otherwise called-
-    #   CargoVariables.RUSTC_FLAGS
-    # Is being used to strip or not strip
-    #
-    # And CARGO_PROFILE_DEV_OPT_LEVEL -otherwise called-
-    #   CargoVariables.DEV_PROF_SET_OPT_LEVEL
-    # Is being used to set the optimizaition level
-    substrs = []
+    '''
+    Generate the build command for cross
+    '''
+
+    substrs = [ f"cd {proj_path} &&"  ]
+
     if strip_cmd is not None:
-        substrs.append(f"{CargoVariables.RUSTC_FLAGS.value}='{strip_cmd.value}'")
+        # Make the strip environment variable
+        substrs.append(f" {CargoVariables.RUSTC_FLAGS.value}='{strip_cmd.value}' ")
+
     if opt_lvl is not None:
+        # Make the opt_lvl environ variable
         substrs.append(
-            f" {CargoVariables.DEV_PROF_SET_OPT_LEVEL.value}={opt_lvl.value}"
+            f" {CargoVariables.DEV_PROF_SET_OPT_LEVEL.value}={opt_lvl.value} "
         )
+
     if attack is not None:
-        substrs.append(f"RUSTFLAGS='-C {attack.value}'")
+        # TODO: In the future an attack could be a rustcflag,
+        # add these to the list
+        substrs.append(f" RUSTFLAGS='-C {attack.value}' ")
 
+    # Add the variable to force podman usage
     if force_podman:
-        substrs.append(
-            f"cd {proj_path} && CROSS_CONTAINER_ENGINE=podman cross build --target={target.value}"
-        )
-    else:
-        substrs.append(f"cd {proj_path} && cross build --target={target.value}")
+        substrs.append(" CROSS_CONTAINER_ENGINE=podman ")
 
-    full_build_str = " ".join(x for x in substrs)
-    return full_build_str
+    # lastly add the command to actually build
+    substrs.append(f"cross build --target={target.value}")
+
+    return " ".join(x for x in substrs)
 
 
 def build_crate(
@@ -108,7 +110,7 @@ def build_crate(
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     if use_cargo:
-        cmd = gen_cargo_build_cmd(crate_path, target, strip, opt_lvl)
+        cmd = gen_cargo_build_cmd(crate_path, target, strip, opt_lvl, force_podman=force_podman)
     else:
         cmd = gen_cross_build_cmd(
             crate_path, target, strip, opt_lvl, force_podman=force_podman
@@ -118,18 +120,11 @@ def build_crate(
     if not crate_path.exists():
         raise Exception(f"Crate {crate} has not been cloned")
     try:
-        # The code below does not function due to 'debug' not being defined. My best guess is that it used to be an option and has since been removed
-        # if not debug:
-        #     subprocess.check_output(
-        #         cmd,
-        #         shell=True,
-        #         stderr=subprocess.DEVNULL,
-        #     )
-        # else:
-        #     subprocess.check_output(cmd, shell=True)
-        subprocess.check_output(cmd, shell=True)
-
+        subprocess.check_output(cmd, shell=True, 
+                                stderr=subprocess.DEVNULL
+                                )
     except Exception as e:
+        print(f"ERROR In build {e}")
         raise CrateBuildException(str(e))
     return
 
@@ -198,53 +193,62 @@ def get_file_type(file_path: Path) -> FileType:
         raise Exception("File type unknown")
 
 
+#TODO: This function could be improved if there exists a better python
+#       module / way to simpily see if a file is an executable. Something
+#       similar to the linux 'file' command
 def is_executable(path: Path) -> bool:
+    """
+    See if the path is an executable. Specifically, parse the binary with
+    lief and check it's format
+    """
+
+    bin = None
     try:
         if not path.is_file():
             return False
-        # This will through an exception if the file type is not
-        # elf or pe or macho
-        # f_type = get_file_type(path)
 
         # TODO: So for some reason lief.parse() prints
         # to stdout when the file type is unknown AND
         # throws an error
-        bin = lief.parse(str(path.resolve()))  # , redirect=True,
-        # stdout=devnull)
-
-        if not hasattr(bin, "format"):
-            return False
-        elif bin.format in [
-            lief.EXE_FORMATS.PE,
-            lief.EXE_FORMATS.ELF,
-            lief.EXE_FORMATS.MACHO,
-            lief.EXE_FORMATS.UNKNOWN,
-        ]:
-            return True
-        return False
+        bin = lief.parse(str(path.resolve()))
     except Exception as e:
-        st = f"Unexpected error seeing if file {path} if an exe: {e}"
+        return False
+
+    if bin is None:
+        return False
+
+    if not hasattr(bin, "format"):
+        return False
+    elif bin.format in [
+        lief.EXE_FORMATS.PE,
+        lief.EXE_FORMATS.ELF,
+        lief.EXE_FORMATS.MACHO,
+        lief.EXE_FORMATS.UNKNOWN,
+    ]:
+        return True
+    else:
         return False
 
 
 def is_object_file(path: Path) -> bool:
-    # Get the file extension
-    file_extension = path.suffix.lower()
-
+    """
+    Explicit function to see if a crate production file is an object file.
+    Specifically if the suffix is .o or .rlib then the file is considered 
+    on object file
+    """
     # Check if the file is a .o or .rlib file
-    if file_extension == ".o" or file_extension == ".rlib":
-        return True
-
-    return False
+    return path.suffix.lower() == ".o" or path.suffix.lower() == ".rlib"
 
 
 class FileSuffixOfInterest(Enum):
+    """"EXplicit suffix names to use when searching for crate productions"""
     O = "o"
     RLIB = "rlib"
     AR = "ar"
 
 
-def any_in(target_list: list[str], val: str):
+def any_in(target_list: list[str], val: str)->bool:
+    """True if element in target list is in val"""
     return any(sub in val for sub in target_list)
 
 
@@ -259,20 +263,26 @@ def find_built_files(
 
     This function will also help find .rlib files
     """
-    import pdb; pdb.set_trace()
-    target_subdirs = [
-        x
-        for x in [target_path.joinpath("debug"), target_path.joinpath("release")]
-        if x.exists()
-    ]
 
-    ret_files = []
-    for subdir in target_subdirs:
-        file_list = []
-        for path in subdir.iterdir():
-            if (is_executable(path) or any_in(target_suffixes, path.suffix.lower())) and not any_in(exclude_suffixes, path.suffix.lower()):
-                file_list.append(path)
-        ret_files.extend(file_list)
+    # Only search in the following two paths
+    debug_path = target_path.joinpath("debug")
+    release_path = target_path.joinpath("release")
+    
+    # glob the files from the above paths into a list, if paths exist
+    files = []
+    if debug_path.exists():
+        files.extend([x for x in debug_path.glob('*') if x.is_file()])
+    if release_path.exists():
+        files.extend([x for x in release_path.glob('*') if x.is_file()])
+
+    #TODO: Funcion name is find_built_files, not find_exes, but we only 
+    #       return exes
+
+    # Now filter out non-exectuables and any files with siffixes in 
+    # exclude suffixes
+    exes = [x for x in files if is_executable(x)]
+    ret_files = [x for x in files if not any_in(exclude_suffixes, x.suffix.lower())]
+
     return ret_files
 
 
