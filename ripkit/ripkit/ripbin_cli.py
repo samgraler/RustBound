@@ -36,7 +36,6 @@ CPU_COUNT_75 = math.floor(CPU_COUNT * 0.75)
 
 
 def build_helper(args):
-
     crate = args[0]
     opt = args[1]
     target = args[2]
@@ -57,7 +56,7 @@ def build_helper(args):
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     # Need the build command for the bundle info, this is NOT used
-    # to actually exectue a build command
+    # to actually execute a build command
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
     else:
@@ -96,7 +95,7 @@ def build_helper(args):
     )
 
     try:
-        # Save analyiss
+        # Save analysis
         stash_bin(binary, info, overwrite_existing=overwrite_existing)
     except Exception as e:
         print(f"Exception {e} in crate {crate}")
@@ -122,7 +121,7 @@ def build_and_stash(
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     # Need the build command for the bundle info, this is NOT used
-    # to actually exectue a build command
+    # to actually execute a build command
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
     else:
@@ -152,7 +151,6 @@ def build_and_stash(
         binary.name,
         binHash,
         target.value,
-        filetype,
         opt.value,
         binary.name,
         "",
@@ -160,7 +158,7 @@ def build_and_stash(
     )
 
     try:
-        # Save analyiss
+        # Save analysis
         stash_bin(binary, info, overwrite_existing)
     except Exception as e:
         print(f"Exception {e} in crate {crate}")
@@ -305,7 +303,6 @@ def seq_build_all_and_stash(
     """
     Sequentially build all the crates found in the local crates_io
     """
-
     # Opt lvl call back
     try:
         opt = opt_lvl_callback(opt_lvl)
@@ -349,7 +346,8 @@ def seq_build_all_and_stash(
 
     success = 0
     # Build and analyze each crate
-    for crate in alive_it(crates_to_build):
+    #for crate in alive_it(crates_to_build):
+    for crate in crates_to_build:
         res = 0
         try:
             res = build_and_stash(crate, opt, target_enum, use_cargo=False)

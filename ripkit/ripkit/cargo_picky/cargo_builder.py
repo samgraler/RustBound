@@ -118,14 +118,16 @@ def build_crate(
     if not crate_path.exists():
         raise Exception(f"Crate {crate} has not been cloned")
     try:
-        if not debug:
-            subprocess.check_output(
-                cmd,
-                shell=True,
-                stderr=subprocess.DEVNULL,
-            )
-        else:
-            subprocess.check_output(cmd, shell=True)
+        # The code below does not function due to 'debug' not being defined. My best guess is that it used to be an option and has since been removed
+        # if not debug:
+        #     subprocess.check_output(
+        #         cmd,
+        #         shell=True,
+        #         stderr=subprocess.DEVNULL,
+        #     )
+        # else:
+        #     subprocess.check_output(cmd, shell=True)
+        subprocess.check_output(cmd, shell=True)
 
     except Exception as e:
         raise CrateBuildException(str(e))
@@ -200,7 +202,7 @@ def is_executable(path: Path) -> bool:
     try:
         if not path.is_file():
             return False
-        # This will through an exeption if the file type is not
+        # This will through an exception if the file type is not
         # elf or pe or macho
         # f_type = get_file_type(path)
 
@@ -257,7 +259,7 @@ def find_built_files(
 
     This function will also help find .rlib files
     """
-
+    import pdb; pdb.set_trace()
     target_subdirs = [
         x
         for x in [target_path.joinpath("debug"), target_path.joinpath("release")]
@@ -266,14 +268,11 @@ def find_built_files(
 
     ret_files = []
     for subdir in target_subdirs:
-        ret_files.extend(
-            [
-                x
-                for x in subdir.iterdir()
-                if (is_executable(x) or any_in(target_suffixes, x.suffix.lower()))
-                and not any_in(exclude_suffixes, x.suffix.lower())
-            ]
-        )
+        file_list = []
+        for path in subdir.iterdir():
+            if (is_executable(path) or any_in(target_suffixes, path.suffix.lower())) and not any_in(exclude_suffixes, path.suffix.lower()):
+                file_list.append(path)
+        ret_files.extend(file_list)
     return ret_files
 
 

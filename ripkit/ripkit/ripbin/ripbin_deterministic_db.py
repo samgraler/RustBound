@@ -65,7 +65,7 @@ class RustBundleMetaData:
     pkg_version: str
 
 
-def init() -> None:
+def ripbin_init() -> None:
     """
     Init the ripbin db
 
