@@ -640,7 +640,7 @@ def get_elf_functions(path: Path, warn_if_stripped: bool = False) -> list[Functi
             raise Exception(f"Cannot get functions in file {path}")
 
         # Create a list of functionInfo objects... symbol_table will give a
-        # list of symbols, grab the function sybols and get there name,
+        # list of symbols, grab the function symbols and get their name,
         # their 'st_value' which is start addr and size
         functionInfo = [
             FunctionInfo(x.name, x["st_value"], f"0x{x['st_value']:x}", x["st_size"])
