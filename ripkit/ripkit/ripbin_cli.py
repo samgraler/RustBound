@@ -61,7 +61,7 @@ def build_helper(args):
     # to actually execute a build command
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(
-            crate_path, target, strip, opt, force_podman=force_podman
+            crate_path, target, strip, opt, force_podman=podman
         )
     else:
         build_cmd = gen_cross_build_cmd(

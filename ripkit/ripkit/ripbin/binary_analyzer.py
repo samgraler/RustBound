@@ -642,11 +642,11 @@ def get_elf_functions(path: Path, warn_if_stripped: bool = False) -> list[Functi
         # Create a list of functionInfo objects... symbol_table will give a
         # list of symbols, grab the function symbols and get their name,
         # their 'st_value' which is start addr and size
-        functionInfo = [
-            FunctionInfo(x.name, x["st_value"], f"0x{x['st_value']:x}", x["st_size"])
-            for x in symbol_table.iter_symbols()
-            if x["st_info"]["type"] == "STT_FUNC"
-        ]
+        functionInfo = []
+        for x in symbol_table.iter_symbols():
+            if x["st_info"]["type"] == "STT_FUNC":
+                func = FunctionInfo(x.name, x["st_value"], f"0x{x['st_value']:x}", x["st_size"])
+                functionInfo.append(func)
 
         if functionInfo == [] and warn_if_stripped:
             # TODO: This warning wont make sense when someone is analyzing an
