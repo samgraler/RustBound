@@ -73,8 +73,7 @@ def modify_bin_padding(
 
     # Modify padding following functions with the correct final byte
     for i in range(len(modify_functions) - 1):
-        #for i in range(10, len(modify_functions) - 10):
-        # Skip functions that were not identified by both methods
+        # Check for functions that were not identified by both methods
         if modify_functions[i].start not in bin_start_addresses:
             console.print(f"[bold yellow][WARNING][/bold yellow] Function at address {modify_functions[i][0]} not identified by both methods (skipped)")
             continue
@@ -84,44 +83,59 @@ def modify_bin_padding(
         padding_start = end_addr + 1 # end_addr + 1 to get to first padding byte
         next_start = modify_functions[i + 1].start
         patchable_addrs = [x for x in range(padding_start, next_start)]
-        patchable_values = binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))
+
+        # Check for duplicate function entries and functions with no padding between them and the next function
+        if padding_start == next_start:
+            if verbose:
+                print(f"Function {i}: {modify_functions[i].start} - {modify_functions[i].end} (no padding following this function)")
+            continue
+        elif padding_start > next_start:
+            if verbose:
+                print(f"Function {i}: {modify_functions[i].start} - {modify_functions[i].end} (duplicate entry)")
+            continue
+        else:
+            if verbose:
+                print(f"Function {i}: {modify_functions[i].start} - {modify_functions[i].end} (padding: {padding_start} - {next_start})")
 
         # Ensure that the last byte of the function is in the follow list (if provided)
         last_byte = binary.get_content_from_virtual_address(end_addr, 1).tolist()[0]
         if (follow != [] and last_byte not in follow):
             if verbose:
-                print(f"Skipping padding following function {i} from {modify_functions[i].start} to {modify_functions[i].end}; "
-                      f"last byte ({last_byte}) not in: {follow}")
+                print(f"Skipping padding; last byte ({last_byte}) not in: {follow}")
             continue
 
         # If the random injection option was not selected, use the given byte sequence
         if not random_injection:
             # If the padding is smaller than the chosen byte string, skip
             if len(patchable_addrs) < len(byte_str):
+                if verbose:
+                    print(f"Skipping padding; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})")
                 continue
             # If the padding is equal or greater than the chosen byte string, use as many full repetitions of byte string as possible without overwriting
             else:
+                if verbose:
+                    print(f"Padding (original): {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                          
                 full_byte_strs = len(patchable_addrs) // len(byte_str)
                 padding_overwrite = byte_str * full_byte_strs
+                binary.patch_address(padding_start, padding_overwrite)
 
                 if verbose:
-                    print(f"Padding (original): {[hex(x) for x in patchable_values]}\n"
-                        f"Padding (patched):  {[hex(x) for x in padding_overwrite]}")
-                    
-                binary.patch_address(padding_start, padding_overwrite)
+                    print(f"Padding (patched):  {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
         
         # Otherwise, use random bytes for the entire length of the padding
         else:
-            # Generate padding_overwrite bytes
+            if verbose:
+                print(f"Padding (original): {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                      
+            # Overwrite padding with random bytes
             padding_overwrite = []
             for i in range(padding_start, next_start):
                 padding_overwrite.append(random.randint(0, 255))
+            binary.patch_address(padding_start, padding_overwrite)
 
             if verbose:
-                print(f"Padding (original): {[hex(x) for x in patchable_values]}\n"
-                      f"Padding (patched):  {[hex(x) for x in padding_overwrite]}")
-                
-            binary.patch_address(padding_start, padding_overwrite)
+                print(f"Padding (patched):  {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
                 
     # Save the modified binary
     binary.write(str(output_path.resolve()))
