@@ -1,7 +1,7 @@
 from typing_extensions import Annotated
 from typing import List, Any
 import lief
-from lief import Binary, Symbol
+from lief import Binary, Symbol, Section
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
 import multiprocessing
@@ -37,8 +37,15 @@ CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
 
 
 console = Console()
+console.width = console.width - 10 # fixes some output issues caused by alive_it progress output "on 0: ", "on 1: ", etc.
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
+def custom_hex(num : int):
+    hex_string = hex(num)
+    if len(hex_string) == 3:  # Single digit hex number
+        return hex_string[:2] + '0' + hex_string[2]  # Insert '0' before the single digit
+    else:
+        return hex_string
 
 def modify_bin_padding(
     binary_path: Path,
@@ -70,6 +77,8 @@ def modify_bin_padding(
     # Sort function addresses
     modify_functions = sorted(modify_functions, key=lambda x: x.start)
     bin_start_addresses = sorted([x.addr for x in bin_analysis_functions])
+    func_modify_count = 0
+    byte_write_count = 0
 
     # Modify padding following functions with the correct final byte
     for i in range(len(modify_functions) - 1):
@@ -87,21 +96,21 @@ def modify_bin_padding(
         # Check for duplicate function entries and functions with no padding between them and the next function
         if padding_start == next_start:
             if verbose:
-                print(f"Function {i}: {modify_functions[i].start} - {modify_functions[i].end} (no padding following this function)")
+                console.print(f"[blue]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/blue] [red](no padding following this function)[/red]")
             continue
         elif padding_start > next_start:
             if verbose:
-                print(f"Function {i}: {modify_functions[i].start} - {modify_functions[i].end} (duplicate entry)")
+                console.print(f"[blue]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/blue] [red](duplicate entry)[/red]")
             continue
         else:
             if verbose:
-                print(f"Function {i}: {modify_functions[i].start} - {modify_functions[i].end} (padding: {padding_start} - {next_start})")
+                console.print(f"[cyan]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/cyan] [magenta](padding: {padding_start} - {next_start})[/magenta]")
 
         # Ensure that the last byte of the function is in the follow list (if provided)
         last_byte = binary.get_content_from_virtual_address(end_addr, 1).tolist()[0]
         if (follow != [] and last_byte not in follow):
             if verbose:
-                print(f"Skipping padding; last byte ({last_byte}) not in: {follow}")
+                console.print(f"Skipping padding; last byte ({last_byte}) not in: {follow}")
             continue
 
         # If the random injection option was not selected, use the given byte sequence
@@ -109,36 +118,47 @@ def modify_bin_padding(
             # If the padding is smaller than the chosen byte string, skip
             if len(patchable_addrs) < len(byte_str):
                 if verbose:
-                    print(f"Skipping padding; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})")
+                    console.print(f"[yellow]Skipping padding; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})[/yellow]")
                 continue
             # If the padding is equal or greater than the chosen byte string, use as many full repetitions of byte string as possible without overwriting
             else:
                 if verbose:
-                    print(f"Padding (original): {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                    console.print(f"Padding (original): {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
                           
                 full_byte_strs = len(patchable_addrs) // len(byte_str)
                 padding_overwrite = byte_str * full_byte_strs
                 binary.patch_address(padding_start, padding_overwrite)
+                func_modify_count += 1
+                byte_write_count += len(padding_overwrite)
 
                 if verbose:
-                    print(f"Padding (patched):  {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                    console.print(f"Padding (patched):  {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
         
         # Otherwise, use random bytes for the entire length of the padding
         else:
             if verbose:
-                print(f"Padding (original): {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                console.print(f"Padding (original): {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
                       
             # Overwrite padding with random bytes
             padding_overwrite = []
             for i in range(padding_start, next_start):
                 padding_overwrite.append(random.randint(0, 255))
             binary.patch_address(padding_start, padding_overwrite)
+            func_modify_count += 1
+            byte_write_count += len(padding_overwrite)
 
             if verbose:
-                print(f"Padding (patched):  {[hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                console.print(f"Padding (patched):  {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
                 
     # Save the modified binary
     binary.write(str(output_path.resolve()))
+
+    # Output metrics
+    console.print("-" * console.width)
+    console.print(f"[bold green]Binary modified and saved to:       {output_path}[/bold green]")
+    console.print(f"[bold green]Function padding sections modified: {func_modify_count} ({(func_modify_count / len(modify_functions) * 100):.4f}%)[/bold green]")
+    console.print(f"[bold green]Bytes (over)written:                {byte_write_count} ({(byte_write_count / binary.virtual_size * 100):.4f}%)[/bold green]")
+    console.print("-" * console.width)
     return
 
 @app.command()
@@ -168,7 +188,6 @@ def edit_padding(
         out_path.mkdir()
 
     byte_str = [int(x, 16) for x in bytestring.split(",")]
-    print(byte_str)
 
     if must_follow == "":
         follow = []
