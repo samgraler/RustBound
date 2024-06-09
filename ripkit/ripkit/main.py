@@ -1,52 +1,38 @@
-import typer
-from rich import print
-from multiprocessing import Pool
-import multiprocessing
-from collections import Counter
-from art import text2art
-import numpy as np
-
-import ghidra.cli as ghidra_cli
-import cargo_picky.db_cli as cargo_db_cli
-
-from typing import List, Tuple, Any
-import ida.cli as ida_cli
-import shutil
-from dataclasses import dataclass, asdict
-import subprocess
-import lief
 import json
-from typing_extensions import Annotated
-from alive_progress import alive_bar, alive_it
-from pathlib import Path
-
-from rich.console import Console
-from rich.table import Table
-from rich.progress import track
-
-import ripbin_cli
-import analyze_cli
-import evil_mod
-
-from cli_utils import opt_lvl_callback, get_enum_type
 import math
-from ripkit.cargo_picky import (
-    build_crate,
-    RustcStripFlags,
-    RustcTarget,
-    CrateBuildException,
-)
+import multiprocessing
+import shutil
+import subprocess
+from collections import Counter
+from dataclasses import asdict, dataclass
+from multiprocessing import Pool
+from pathlib import Path
+from typing import Any, List, Tuple
 
-from ripkit.ripbin import (
-    get_functions,
-    save_analysis,
-    calculate_md5,
-    RustFileBundle,
-    generate_minimal_labeled_features,
-    AnalysisType,
-    disasm_at,
-    iterable_path_shallow_callback,
-)
+import analyze_cli
+import cargo_picky.db_cli as cargo_db_cli
+import evil_mod
+import ghidra.cli as ghidra_cli
+import ida.cli as ida_cli
+import lief
+import numpy as np
+import ripbin_cli
+import typer
+from alive_progress import alive_bar, alive_it
+from art import text2art
+from cli_utils import get_enum_type, opt_lvl_callback
+from rich import print
+from rich.console import Console
+from rich.progress import track
+from rich.table import Table
+from typing_extensions import Annotated
+
+from ripkit.cargo_picky import (CrateBuildException, RustcStripFlags,
+                                RustcTarget, build_crate)
+from ripkit.ripbin import (AnalysisType, RustFileBundle, calculate_md5,
+                           disasm_at, generate_minimal_labeled_features,
+                           get_functions, iterable_path_shallow_callback,
+                           save_analysis)
 
 
 class tmp:
@@ -333,7 +319,7 @@ def export_large_dataset(
         return
 
     # Get a dictionary of all the binaries that are in the ripbin db
-    org_bins = get_all_bins()
+    org_bins = ripbin_cli.get_all_bins()
 
     # Need to find all the bins that exist in each opt lvl
     # and that are atleast the min number of bytes long

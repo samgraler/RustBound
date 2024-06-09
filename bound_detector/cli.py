@@ -739,7 +739,7 @@ def lit_model_train(
     if print_summary:
         summary(model, (32, 1000, 255))
 
-    trainer = pylight.Trainer(max_epochs=100, default_root_dir=checkpoint_dir)
+    trainer = pylight.Trainer(max_epochs=epochs, default_root_dir=checkpoint_dir)
 
     # Train the model
     trainer.fit(classifier, train_loader, valid_loader)
@@ -1001,7 +1001,7 @@ def rnn_predict(model, unstripped_bin, threshold: float):
 def gen_unified_train(
     inp_dir: Annotated[str,
                        typer.Argument(
-                           help='Directory of bings to train on')], ):
+                           help='Directory of bins to train on')], ):
     '''
     Get files from each opt level to train on 
     5 opt levels, 20 files each
@@ -1140,7 +1140,7 @@ def train_on(
 #    ##
 #    rust_files = []
 #
-#    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
 #        info_file = parent / 'info.json'
 #        info = {}
 #        try:
@@ -1203,7 +1203,7 @@ def train_on(
 #    # Get the test files
 #    rust_test_files = [ x.name for x in test_path.glob('*')]
 #
-#    for parent in Path("/home/ryan/.ripbin/ripped_bins/").iterdir():
+#    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
 #        info_file = parent / 'info.json'
 #        info = {}
 #        try:
@@ -1531,7 +1531,7 @@ def convert_npz_to_func_list(bin_path: Path, npz: np.ndarray) -> np.ndarray:
 
 def all_lief_gnd_truth(bin_path: Path):
     '''
-    Retrun labels all the functions in the .text section of the 
+    Return labels all the functions in the .text section of the 
     binary
     '''
     bin = lief.parse(str(bin_path.resolve()))
@@ -1705,7 +1705,7 @@ def all_lief_gnd_truth(bin_path: Path):
 #    print(f"Metrics: {calc_metrics(total_end_conf)}")
 #    return
 
-
+# TODO: either title or docstring is incorrect
 def read_birnn_npz(inp: Path) -> np.ndarray:
     '''
     Read the ida npz

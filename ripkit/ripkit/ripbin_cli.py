@@ -1,39 +1,32 @@
-from typing_extensions import Annotated
-from typing import List
-import math
-from multiprocessing import Pool
-import multiprocessing
-from dataclasses import dataclass
-import lief
-import shutil
 import json
-from alive_progress import alive_bar, alive_it
-from rich.console import Console
+import math
+import multiprocessing
 import shlex
-from rich.table import Table
-from rich.progress import track
-from rich import print
+import shutil
 import subprocess
-from pathlib import Path
-import typer
-from cli_utils import opt_lvl_callback, get_enum_type
+from dataclasses import dataclass
 from enum import Enum
+from multiprocessing import Pool
+from pathlib import Path
+from typing import List
 
-from ripkit.cargo_picky import (
-    gen_cargo_build_cmd,
-    gen_cross_build_cmd,
-    get_target_productions,
-    is_executable,
-    LocalCratesIO,
-    build_crate,
-    RustcStripFlags,
-    RustcOptimization,
-    RustcTarget,
-    CrateBuildException,
-)
+import lief
+import typer
+from alive_progress import alive_bar, alive_it
+from cli_utils import get_enum_type, opt_lvl_callback
+from rich import print
+from rich.console import Console
+from rich.progress import track
+from rich.table import Table
+from typing_extensions import Annotated
 
-from ripkit.ripbin import stash_bin, calculate_md5, RustFileBundle, CompileTimeAttacks
-from cli_utils import get_enum_type
+from ripkit.cargo_picky import (CrateBuildException, LocalCratesIO,
+                                RustcOptimization, RustcStripFlags,
+                                RustcTarget, build_crate, gen_cargo_build_cmd,
+                                gen_cross_build_cmd, get_target_productions,
+                                is_executable)
+from ripkit.ripbin import (CompileTimeAttacks, RustFileBundle, calculate_md5,
+                           ripbin_init, stash_bin)
 
 console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
@@ -43,7 +36,6 @@ CPU_COUNT_75 = math.floor(CPU_COUNT * 0.75)
 
 
 def build_helper(args):
-
     crate = args[0]
     opt = args[1]
     target = args[2]
@@ -66,10 +58,10 @@ def build_helper(args):
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     # Need the build command for the bundle info, this is NOT used
-    # to actually exectue a build command
+    # to actually execute a build command
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(
-            crate_path, target, strip, opt, force_podman=force_podman
+            crate_path, target, strip, opt, force_podman=podman
         )
     else:
         build_cmd = gen_cross_build_cmd(
@@ -106,7 +98,7 @@ def build_helper(args):
     )
 
     try:
-        # Save analyiss
+        # Save analysis
         stash_bin(binary, info, overwrite_existing=overwrite_existing)
     except Exception as e:
         print(f"Exception {e} in crate {crate}")
@@ -132,7 +124,7 @@ def build_and_stash(
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     # Need the build command for the bundle info, this is NOT used
-    # to actually exectue a build command
+    # to actually execute a build command
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
     else:
@@ -162,7 +154,6 @@ def build_and_stash(
         binary.name,
         binHash,
         target.value,
-        filetype,
         opt.value,
         binary.name,
         "",
@@ -170,7 +161,7 @@ def build_and_stash(
     )
 
     try:
-        # Save analyiss
+        # Save analysis
         stash_bin(binary, info, overwrite_existing)
     except Exception as e:
         print(f"Exception {e} in crate {crate}")
@@ -221,6 +212,16 @@ def print_rust_targets():
 
 
 @app.command()
+def init():
+    '''
+    Initialize the ripbin db
+    '''
+
+    ripbin_init()
+    return
+
+
+@app.command()
 def build_stash_all(
     opt_lvl: Annotated[
         str, typer.Argument(help="The optimization level to compile for")
@@ -256,7 +257,7 @@ def build_stash_all(
     # If we don't have to build all the crates, find the crates that
     # are already built with the specified optimization and arch
     # an dremovet that from the list of installed crates
-    for parent in Path("~/.ripbin/ripped_bins/").expanduser().iterdir():
+    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / "info.json"
         info = {}
         try:
@@ -304,7 +305,6 @@ def seq_build_all_and_stash(
     """
     Sequentially build all the crates found in the local crates_io
     """
-
     # Opt lvl call back
     try:
         opt = opt_lvl_callback(opt_lvl)
@@ -348,7 +348,8 @@ def seq_build_all_and_stash(
 
     success = 0
     # Build and analyze each crate
-    for crate in alive_it(crates_to_build):
+    #for crate in alive_it(crates_to_build):
+    for crate in crates_to_build:
         res = 0
         try:
             res = build_and_stash(crate, opt, target_enum, use_cargo=False)

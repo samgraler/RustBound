@@ -1,13 +1,20 @@
 import hashlib
-from enum import Enum
-from dataclasses import dataclass
-import numpy as np
-from pathlib import Path
-import shutil
-from typing import Union, Generator
 import inspect
-import pandas as pd
 import json
+import shutil
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Generator, Union
+
+import numpy as np
+import pandas as pd
+
+from .analyzer_types import (AnalysisType, Compiler, Coptimization, FileType,
+                             GoOptimization, ProgLang, RustcOptimization)
+from .binary_analyzer import get_functions
+from .ripbin_exceptions import (AnalysisExistsError, RipbinAnalysisError,
+                                RipbinDbError, RipbinRegistryError)
 
 # One file is going to be a dataclass
 # the name of the file
@@ -34,22 +41,6 @@ import json
 # to make gathering binaries faster, but then I have to
 # worry about keeping the two insync
 
-from .ripbin_exceptions import (
-    RipbinRegistryError,
-    RipbinAnalysisError,
-    RipbinDbError,
-    AnalysisExistsError,
-)
-from .analyzer_types import (
-    Compiler,
-    RustcOptimization,
-    ProgLang,
-    FileType,
-    GoOptimization,
-    AnalysisType,
-    Coptimization,
-)
-from .binary_analyzer import get_functions
 
 DB_PATH = Path("~/.ripbin/").expanduser().resolve()
 RIPBIN_BINS = DB_PATH.joinpath("ripped_bins")
@@ -74,7 +65,7 @@ class RustBundleMetaData:
     pkg_version: str
 
 
-def init() -> None:
+def ripbin_init() -> None:
     """
     Init the ripbin db
 
