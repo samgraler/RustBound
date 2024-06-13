@@ -4,13 +4,12 @@ import lief
 from lief import Binary, Symbol, Section
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
-import multiprocessing
+from multiprocessing import cpu_count, Pool
 from rich.console import Console
 from dataclasses import dataclass
 import typer
 import random
 import math
-
 
 from ripkit.ripbin import (
     get_functions,
@@ -31,15 +30,14 @@ class ModifyPaddingInfo:
     size: int
     symbol: Symbol
 
-
-num_cores = multiprocessing.cpu_count()
+num_cores = cpu_count()
 CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
-
 
 console = Console()
 console.width = console.width - 10 # fixes some output issues caused by alive_it progress output "on 0: ", "on 1: ", etc.
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
+# Function to convert a single digit hex number to a two digit hex number (for cleaner output)
 def custom_hex(num : int):
     hex_string = hex(num)
     if len(hex_string) == 3:  # Single digit hex number
@@ -47,14 +45,85 @@ def custom_hex(num : int):
     else:
         return hex_string
 
-def modify_bin_padding(
-    binary_path: Path,
-    byte_str: List[int],
-    output_path: Path,
-    follow: List[int],
-    verbose: bool = False,
-    random_injection: bool = False,
+
+# Function to update the progress bar when a worker completes its task
+def update_progress(result, bar):
+    bar()
+
+
+@app.command()
+def edit_padding(
+    dataset: Annotated[
+        str,
+        typer.Argument(help="Input dataset", callback=iterable_path_shallow_callback),
+    ],
+    output_dir: Annotated[str, typer.Argument(help="output dir")],
+    bytestring: Annotated[
+        str,
+        typer.Argument(help="Byte pattern to inject, write in hex separated by comma (90,90: nop,nop for x86-64)"),
+    ],
+    must_follow: Annotated[
+        str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by comma (c3: ret for x86-64)")
+    ] = "",
+    verbose: Annotated[bool, typer.Option()] = False,
+    random_injection: Annotated[bool, typer.Option(help="Overwrite padding with random byte sequences (this option negates bytestring argument)")] = False,
+    num_workers: Annotated[int, typer.Option(help="Number of workers to use for multiprocessing", show_default=True)] = CPU_COUNT_75,
 ):
+    """
+    Copy and modify the input dataset. Specifically, modify the padding
+    byte preceding functions
+    """
+
+    out_path = Path(output_dir)
+    if not out_path.exists():
+        out_path.mkdir()
+
+    byte_str = [int(x, 16) for x in bytestring.split(",")]
+
+    if must_follow == "":
+        follow = []
+    else:
+        follow = [int(x, 16) for x in must_follow.split(",")]
+
+    # Create a list of arguments for the multiprocessing pool
+    args = []
+    for bin in dataset:
+        args.append((bin, byte_str, out_path.joinpath(bin.name), follow, verbose, random_injection))
+
+    # Handle improper num_workers input
+    if num_workers > CPU_COUNT_75:
+        num_workers = CPU_COUNT_75
+    elif num_workers < 1:
+        num_workers = 1
+    
+    # Process the binaries in parallel
+    pool = Pool(processes=num_workers)
+    with alive_bar(len(args), title="Modifying padding") as bar:
+        results = []
+        # Use pool.apply_async to execute the worker_function with the tasks
+        for arg in args:
+            result = pool.apply_async(modify_bin_padding, args=(arg,), callback=lambda x: update_progress(x, bar))
+            results.append(result)
+        # Wait for all results to complete
+        for result in results:
+            result.wait()
+    pool.close()
+    pool.join()
+
+    return
+
+
+def modify_bin_padding(
+    args: tuple[Path, List[int], Path, List[int], bool, bool]
+):
+    # Unpack arguments
+    binary_path = args[0]
+    byte_str = args[1]
+    output_path = args[2]
+    follow = args[3]
+    verbose = args[4]
+    random_injection = args[5]
+
     # Load the binary
     binary: Binary = lief.parse(str(binary_path.resolve()))
 
@@ -154,48 +223,12 @@ def modify_bin_padding(
     binary.write(str(output_path.resolve()))
 
     # Output metrics
+    console.print("\n")
     console.print("-" * console.width)
     console.print(f"[bold green]Binary modified and saved to:       {output_path}[/bold green]")
     console.print(f"[bold green]Function padding sections modified: {func_modify_count} ({(func_modify_count / len(modify_functions) * 100):.4f}%)[/bold green]")
     console.print(f"[bold green]Bytes (over)written:                {byte_write_count} ({(byte_write_count / binary.virtual_size * 100):.4f}%)[/bold green]")
     console.print("-" * console.width)
-    return
-
-@app.command()
-def edit_padding(
-    dataset: Annotated[
-        str,
-        typer.Argument(help="Input dataset", callback=iterable_path_shallow_callback),
-    ],
-    output_dir: Annotated[str, typer.Argument(help="output dir")],
-    bytestring: Annotated[
-        str,
-        typer.Argument(help="Byte pattern to inject, write in hex separated by comma (90,90: nop,nop for x86-64)"),
-    ],
-    must_follow: Annotated[
-        str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by comma (c3: ret for x86-64)")
-    ] = "",
-    verbose: Annotated[bool, typer.Option()] = False,
-    random_injection: Annotated[bool, typer.Option(help="Overwrite padding with random byte sequences (this option negates bytestring argument)")] = False,
-):
-    """
-    Copy and modify the input dataset. Specifically, modify the padding
-    byte preceding functions
-    """
-
-    out_path = Path(output_dir)
-    if not out_path.exists():
-        out_path.mkdir()
-
-    byte_str = [int(x, 16) for x in bytestring.split(",")]
-
-    if must_follow == "":
-        follow = []
-    else:
-        follow = [int(x, 16) for x in must_follow.split(",")]
-
-    for bin in alive_it(dataset):
-        modify_bin_padding(bin, byte_str, out_path.joinpath(bin.name), follow, verbose, random_injection)
     return
 
 
