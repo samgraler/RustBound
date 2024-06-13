@@ -53,26 +53,42 @@ def update_progress(result, bar):
 
 @app.command()
 def edit_padding(
-    dataset: Annotated[
+    dataset_dir: Annotated[
         str,
-        typer.Argument(help="Input dataset", callback=iterable_path_shallow_callback),
+        typer.Argument(help="Input dataset directory", callback=iterable_path_shallow_callback),
     ],
-    output_dir: Annotated[str, typer.Argument(help="output dir")],
+    output_dir: Annotated[str, typer.Argument(help="Output directory")],
     bytestring: Annotated[
         str,
-        typer.Argument(help="Byte pattern to inject, write in hex separated by comma (90,90: nop,nop for x86-64)"),
+        typer.Argument(help="Byte pattern to inject, write in hex separated by comma (e.g. 90,90: nop,nop for x86-64)"),
     ],
     must_follow: Annotated[
-        str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by comma (c3: ret for x86-64)")
+        str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by commas (e.g. c3,00,ff) "
+                          "WARNING: OMISSION OF THIS OPTION WILL LIKELY LEAD TO FUNCTIONALITY ISSUES IN THE MODIFIED BINARY")
     ] = "",
     verbose: Annotated[bool, typer.Option()] = False,
     random_injection: Annotated[bool, typer.Option(help="Overwrite padding with random byte sequences (this option negates bytestring argument)")] = False,
     num_workers: Annotated[int, typer.Option(help="Number of workers to use for multiprocessing", show_default=True)] = CPU_COUNT_75,
 ):
     """
-    Copy and modify the input dataset. Specifically, modify the padding
-    byte preceding functions
+    Modify the padding bytes of the input dataset, preserving functionality (with proper usage), and write to the output directory. 
+    
+    The --must-follow option is recommended (especially when using --random-injection), as it preserves functionality regardless of
+    the byte string injected into the padding (padding sections following 00, ff, c3, e1, and e0 seem to be safe to modify in any way (for x86-64);
+    This restriction still allows for the modification of the vast majority of padding sections in a given binary).
+    
+    Without --must-follow, certain bytestrings may still be safe to inject everywhere (every padding section) (such as: <any byte>,c3)
+    
+    Manual inspection of the modified binaries is recommended to ensure functionality is preserved. The guidelines presented here are simply
+    observations thus far, and may not be applicable to all binaries.
     """
+
+    # Example usage:
+    # python ripkit/main.py modify edit-padding --random-injection --must-follow c3,00,ff,e1,e0 ~/modify_test_input/ ~/modify_test_output/ 00
+    # Test executable with
+    # ~/modify_test_output/<file> --help
+    # View differences using objdump
+    # diff -u <(objdump -s ~/modify_test_input/<file>) <(objdump -s ~/modify_test_output/<file>)`
 
     out_path = Path(output_dir)
     if not out_path.exists():
@@ -87,7 +103,7 @@ def edit_padding(
 
     # Create a list of arguments for the multiprocessing pool
     args = []
-    for bin in dataset:
+    for bin in dataset_dir:
         args.append((bin, byte_str, out_path.joinpath(bin.name), follow, verbose, random_injection))
 
     # Handle improper num_workers input
@@ -179,7 +195,7 @@ def modify_bin_padding(
         last_byte = binary.get_content_from_virtual_address(end_addr, 1).tolist()[0]
         if (follow != [] and last_byte not in follow):
             if verbose:
-                console.print(f"Skipping padding; last byte ({last_byte}) not in: {follow}")
+                console.print(f"[yellow]Skipping padding[/yellow]; last byte ({last_byte}) not in: {follow}")
             continue
 
         # If the random injection option was not selected, use the given byte sequence
@@ -187,7 +203,7 @@ def modify_bin_padding(
             # If the padding is smaller than the chosen byte string, skip
             if len(patchable_addrs) < len(byte_str):
                 if verbose:
-                    console.print(f"[yellow]Skipping padding; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})[/yellow]")
+                    console.print(f"[yellow]Skipping padding[/yellow]; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})")
                 continue
             # If the padding is equal or greater than the chosen byte string, use as many full repetitions of byte string as possible without overwriting
             else:
