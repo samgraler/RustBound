@@ -639,6 +639,8 @@ def get_elf_functions(path: Path, warn_if_stripped: bool = False) -> list[Functi
         if symbol_table is None or text_section is None:
             raise Exception(f"Cannot get functions in file {path}")
 
+        # TODO: Fix this function so we only identify functions in the .text section (the issue was that we were modifying a jump table by mistake)
+
         # Create a list of functionInfo objects... symbol_table will give a
         # list of symbols, grab the function symbols and get their name,
         # their 'st_value' which is start addr and size
