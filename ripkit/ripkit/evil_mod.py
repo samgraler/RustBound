@@ -29,6 +29,7 @@ class ModifyPaddingInfo:
     end: int
     size: int
     symbol: Symbol
+    name: str
 
 num_cores = cpu_count()
 CPU_COUNT_75 = math.floor(num_cores * (3 / 4))
@@ -63,32 +64,26 @@ def edit_padding(
         typer.Argument(help="Byte pattern to inject, write in hex separated by comma (e.g. 90,90: nop,nop for x86-64)"),
     ],
     must_follow: Annotated[
-        str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by commas (e.g. c3,00,ff) "
-                          "WARNING: OMISSION OF THIS OPTION WILL LIKELY LEAD TO FUNCTIONALITY ISSUES IN THE MODIFIED BINARY")
+        str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by commas (e.g. c3,00,ff)")
     ] = "",
     verbose: Annotated[bool, typer.Option()] = False,
     random_injection: Annotated[bool, typer.Option(help="Overwrite padding with random byte sequences (this option negates bytestring argument)")] = False,
     num_workers: Annotated[int, typer.Option(help="Number of workers to use for multiprocessing", show_default=True)] = CPU_COUNT_75,
 ):
     """
-    Modify the padding bytes of the input dataset, preserving functionality (with proper usage), and write to the output directory. 
+    Modify the padding bytes of the input dataset (preserving functionality), and write to the output directory. 
     
-    The --must-follow option is recommended (especially when using --random-injection), as it preserves functionality regardless of
-    the byte string injected into the padding (padding sections following 00, ff, c3, e1, and e0 seem to be safe to modify in any way (for x86-64);
-    This restriction still allows for the modification of the vast majority of padding sections in a given binary).
-    
-    Without --must-follow, certain bytestrings may still be safe to inject everywhere (every padding section) (such as: <any byte>,c3)
-    
-    Manual inspection of the modified binaries is recommended to ensure functionality is preserved. The guidelines presented here are simply
-    observations thus far, and may not be applicable to all binaries.
+    Manual inspection of the modified binaries is recommended to ensure functionality is preserved.
     """
 
     # Example usage:
-    # python ripkit/main.py modify edit-padding --random-injection --must-follow c3,00,ff,e1,e0 ~/modify_test_input/ ~/modify_test_output/ 00
-    # Test executable with
+    # python ripkit/main.py modify edit-padding --random-injection ~/modify_test_input/ ~/modify_test_output/ 00
+    # Test executable files with
     # ~/modify_test_output/<file> --help
-    # View differences using objdump
-    # diff -u <(objdump -s ~/modify_test_input/<file>) <(objdump -s ~/modify_test_output/<file>)`
+    # View differences in files using objdump / diff
+    # objdump -D ~/modify_test_input/<file> > /tmp/<file>_dump_orig
+    # objdump -D ~/modify_test_output/<file> > /tmp/<file>_dump_mod
+    # diff -y /tmp/<file>_dump_orig /tmp/<file>_dump_mod > /tmp/<file>_mod_diff
 
     out_path = Path(output_dir)
     if not out_path.exists():
@@ -113,22 +108,22 @@ def edit_padding(
         num_workers = 1
     
     # Process the binaries in parallel
-    # pool = Pool(processes=num_workers)
-    # with alive_bar(len(args), title="Modifying padding") as bar:
-    #     results = []
-    #     # Use pool.apply_async to execute the worker_function with the tasks
-    #     for arg in args:
-    #         result = pool.apply_async(modify_bin_padding, args=(arg,), callback=lambda x: update_progress(x, bar))
-    #         results.append(result)
-    #     # Wait for all results to complete
-    #     for result in results:
-    #         result.wait()
-    # pool.close()
-    # pool.join()
+    pool = Pool(processes=num_workers)
+    with alive_bar(len(args), title="Modifying padding") as bar:
+        results = []
+        # Use pool.apply_async to execute the worker_function with the tasks
+        for arg in args:
+            result = pool.apply_async(modify_bin_padding, args=(arg,), callback=lambda x: update_progress(x, bar))
+            results.append(result)
+        # Wait for all results to complete
+        for result in results:
+            result.wait()
+    pool.close()
+    pool.join()
 
     # Process the binaries sequentially (for debugging)
-    for arg in args:
-        modify_bin_padding(arg)
+    # for arg in args:
+    #     modify_bin_padding(arg)
 
     return
 
@@ -158,11 +153,11 @@ def modify_bin_padding(
 
     modify_functions: list[ModifyPaddingInfo] = []
     for symbol in binary.symbols:
-        if symbol.type == lief.ELF.SYMBOL_TYPES.FUNC and symbol.size != 0:
+        if symbol.type == lief.ELF.SYMBOL_TYPES.FUNC:
             for i in range(len(text_start)):
                 # Verify that the function symbol is within a text section
                 if text_start[i] <= symbol.value < text_end[i]:
-                    func = ModifyPaddingInfo(symbol.value, symbol.value + symbol.size - 1, symbol.size, symbol)
+                    func = ModifyPaddingInfo(symbol.value, symbol.value + symbol.size - 1, symbol.size, symbol, symbol.name)
                     modify_functions.append(func)
                     break
 
@@ -178,13 +173,16 @@ def modify_bin_padding(
     func_modify_count = 0
     byte_write_count = 0
 
-    import pdb; pdb.set_trace()
-
-    # Modify padding following functions with the correct final byte
+    # Modify padding
     for i in range(len(modify_functions) - 1):
         # Check for functions that were not identified by both methods
         if modify_functions[i].start not in bin_start_addresses:
-            console.print(f"[bold yellow][WARNING][/bold yellow] Function at address {modify_functions[i][0]} not identified by both methods (skipped)")
+            console.print(f"[bold yellow][WARNING][/bold yellow]: Function at address {modify_functions[i].start} ({modify_functions[i].name}) not identified by both methods")
+
+        # Check to ensure function has a non-zero size
+        if modify_functions[i].size == 0:
+            if verbose:
+                console.print(f"[yellow]Skipping padding[/yellow]; Function at address {modify_functions[i].start} ({modify_functions[i].name}) has a size of 0")
             continue
 
         # Get end address of current function and start address of next function (to derive padding (patchable bytes))

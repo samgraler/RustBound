@@ -626,14 +626,10 @@ def get_elf_functions(path: Path, warn_if_stripped: bool = False) -> list[Functi
     Therefore those names will be included in the list, but will have
     a size of 0
     """
-    # The note listed above is an enormous issue as far as modifying binaries...
-    # What is currently happening is that the edit-padding function is ignoring these as functions
-    # And is just overwriting them with random bytes or the given byte string. This is what causes 
-    # The binaries to crash if the --must-follow byte is not specified, because we just write directly
-    # over these injected functions
-    # TODO: figure out how to fix this...
+    # TODO: I do not believe that this function actually inserts functions injected by gcc into the list
 
     with open(path, "rb") as f:
+        # This conversion to ELFFile is what currently causes gcc injected functions to be ignored
         elf = ELFFile(f)
 
         # Get the symbol table
