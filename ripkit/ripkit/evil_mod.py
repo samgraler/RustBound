@@ -113,18 +113,22 @@ def edit_padding(
         num_workers = 1
     
     # Process the binaries in parallel
-    pool = Pool(processes=num_workers)
-    with alive_bar(len(args), title="Modifying padding") as bar:
-        results = []
-        # Use pool.apply_async to execute the worker_function with the tasks
-        for arg in args:
-            result = pool.apply_async(modify_bin_padding, args=(arg,), callback=lambda x: update_progress(x, bar))
-            results.append(result)
-        # Wait for all results to complete
-        for result in results:
-            result.wait()
-    pool.close()
-    pool.join()
+    # pool = Pool(processes=num_workers)
+    # with alive_bar(len(args), title="Modifying padding") as bar:
+    #     results = []
+    #     # Use pool.apply_async to execute the worker_function with the tasks
+    #     for arg in args:
+    #         result = pool.apply_async(modify_bin_padding, args=(arg,), callback=lambda x: update_progress(x, bar))
+    #         results.append(result)
+    #     # Wait for all results to complete
+    #     for result in results:
+    #         result.wait()
+    # pool.close()
+    # pool.join()
+
+    # Process the binaries sequentially (for debugging)
+    for arg in args:
+        modify_bin_padding(arg)
 
     return
 
@@ -146,12 +150,21 @@ def modify_bin_padding(
     # Get functions from the binary using binary_analyzer (does not exclude functions of length 0)
     bin_analysis_functions: list[FunctionInfo] = get_functions(binary_path)
 
-    # Get functions from the binary using symbol table, excluding those that have a size of 0
+    # Get functions from the binary using symbol table, excluding those that have a size of 0, and those that are not in the (a) text section
+    # Find the .text section(s) start and end addresses
+    text_sections: list[Section] = [section for section in binary.sections if section.name == ".text"]
+    text_start = [section.virtual_address for section in text_sections]
+    text_end = [section.virtual_address + section.size for section in text_sections]
+
     modify_functions: list[ModifyPaddingInfo] = []
     for symbol in binary.symbols:
         if symbol.type == lief.ELF.SYMBOL_TYPES.FUNC and symbol.size != 0:
-            func = ModifyPaddingInfo(symbol.value, symbol.value + symbol.size - 1, symbol.size, symbol)
-            modify_functions.append(func)
+            for i in range(len(text_start)):
+                # Verify that the function symbol is within a text section
+                if text_start[i] <= symbol.value < text_end[i]:
+                    func = ModifyPaddingInfo(symbol.value, symbol.value + symbol.size - 1, symbol.size, symbol)
+                    modify_functions.append(func)
+                    break
 
     # Ensure function counts match (display warning if they don't)
     bin_analysis_functions = [x for x in bin_analysis_functions if x.size != 0]
@@ -164,6 +177,8 @@ def modify_bin_padding(
     bin_start_addresses = sorted([x.addr for x in bin_analysis_functions])
     func_modify_count = 0
     byte_write_count = 0
+
+    import pdb; pdb.set_trace()
 
     # Modify padding following functions with the correct final byte
     for i in range(len(modify_functions) - 1):
