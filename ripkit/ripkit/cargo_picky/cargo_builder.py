@@ -110,7 +110,7 @@ def build_crate(
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
 
     if use_cargo:
-        cmd = gen_cargo_build_cmd(crate_path, target, strip, opt_lvl, force_podman=force_podman)
+        cmd = gen_cargo_build_cmd(crate_path, target, strip, opt_lvl)
     else:
         cmd = gen_cross_build_cmd(
             crate_path, target, strip, opt_lvl, force_podman=force_podman

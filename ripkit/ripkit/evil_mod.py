@@ -4,7 +4,7 @@ import lief
 from lief import Binary, Symbol, Section
 from alive_progress import alive_bar, alive_it
 from pathlib import Path
-from multiprocessing import cpu_count, Pool
+from multiprocessing import cpu_count, Pool, Lock
 from rich.console import Console
 from dataclasses import dataclass
 import typer
@@ -51,6 +51,15 @@ def custom_hex(num : int):
 def update_progress(result, bar):
     bar()
 
+# init function to allow for global lock variable to be passed to the workers
+def init(l):
+    global lock
+    lock = l
+
+def lock_print(msg):
+    lock.acquire()
+    console.print(msg)
+    lock.release()
 
 @app.command()
 def edit_padding(
@@ -108,7 +117,8 @@ def edit_padding(
         num_workers = 1
     
     # Process the binaries in parallel
-    pool = Pool(processes=num_workers)
+    l = Lock()
+    pool = Pool(processes=num_workers, initializer=init, initargs=(l,))
     with alive_bar(len(args), title="Modifying padding") as bar:
         results = []
         # Use pool.apply_async to execute the worker_function with the tasks
@@ -124,13 +134,36 @@ def edit_padding(
     # Process the binaries sequentially (for debugging)
     # for arg in args:
     #     modify_bin_padding(arg)
-
+    
+    # Process modification results (across entire dataset)
+    tot_func_modify, tot_total_func, tot_byte_write, tot_total_byte, tot_duplicate, tot_back_to_back, tot_zero_size = 0, 0, 0, 0, 0, 0, 0
+    for result in results:
+        func_modify, total_func, byte_write, total_byte, duplicate, back_to_back, zero_size = result.get()
+        tot_func_modify += func_modify
+        tot_total_func += total_func
+        tot_byte_write += byte_write
+        tot_total_byte += total_byte
+        tot_duplicate += duplicate
+        tot_back_to_back += back_to_back
+        tot_zero_size += zero_size
+    
+    # Format output
+    output = "-" * console.width + "\n"
+    output += f"[bold magenta]Dataset Modification Statistics:[/bold magenta]\n" 
+    output += "-" * console.width + "\n"
+    output += f"[bold green]Function padding sections modified: [/bold green]{(tot_func_modify / tot_total_func * 100):.4f}% ({tot_func_modify} of {tot_total_func})\n"
+    output += f"[bold green]     Back-to-back functions:        [/bold green]{tot_back_to_back}\n"
+    output += f"[bold green]     Duplicate functions:           [/bold green]{tot_duplicate}\n"
+    output += f"[bold green]     Zero-size functions:           [/bold green]{tot_zero_size}\n"
+    output += f"[bold green]Bytes (over)written:                [/bold green]{(tot_byte_write / tot_total_byte * 100):.4f}% ({tot_byte_write} of {tot_total_byte})\n"
+    output += "-" * console.width + "\n"
+    console.print(output)
     return
 
 
 def modify_bin_padding(
     args: tuple[Path, List[int], Path, List[int], bool, bool]
-):
+) -> tuple[int, int, int, int, int, int, int]:
     # Unpack arguments
     binary_path = args[0]
     byte_str = args[1]
@@ -138,6 +171,12 @@ def modify_bin_padding(
     follow = args[3]
     verbose = args[4]
     random_injection = args[5]
+
+    # Variable to hold output for the worker function (to be printed at the end of the function with the lock acquired)
+    full_output = "\n"
+    full_output += "-" * console.width + "\n"
+    full_output += f"[bold cyan]Modifying Binary: {binary_path}[/bold cyan]\n"
+    full_output += "-" * console.width + "\n"
 
     # Load the binary
     binary: Binary = lief.parse(str(binary_path.resolve()))
@@ -164,25 +203,30 @@ def modify_bin_padding(
     # Ensure function counts match (display warning if they don't)
     bin_analysis_functions = [x for x in bin_analysis_functions if x.size != 0]
     if len(bin_analysis_functions) != len(modify_functions):
-        console.print(f"[bold yellow][WARNING][/bold yellow] Function identification produced two different counts: "
-              f"{len(bin_analysis_functions)} vs {len(modify_functions)}")
+        if verbose:
+            full_output += f"[bold yellow][WARNING][/bold yellow] Function identification produced two different counts: {len(bin_analysis_functions)} vs {len(modify_functions)}\n"
 
     # Sort function addresses
     modify_functions = sorted(modify_functions, key=lambda x: x.start)
     bin_start_addresses = sorted([x.addr for x in bin_analysis_functions])
     func_modify_count = 0
     byte_write_count = 0
+    duplicate_count = 0
+    back_to_back_count = 0
+    zero_size_count = 0
 
     # Modify padding
     for i in range(len(modify_functions) - 1):
         # Check for functions that were not identified by both methods
         if modify_functions[i].start not in bin_start_addresses:
-            console.print(f"[bold yellow][WARNING][/bold yellow]: Function at address {modify_functions[i].start} ({modify_functions[i].name}) not identified by both methods")
+            if verbose:
+                full_output += f"[bold yellow][WARNING][/bold yellow]: Function at address {modify_functions[i].start} ({modify_functions[i].name}) not identified by both methods\n"
 
         # Check to ensure function has a non-zero size
         if modify_functions[i].size == 0:
+            zero_size_count += 1
             if verbose:
-                console.print(f"[yellow]Skipping padding[/yellow]; Function at address {modify_functions[i].start} ({modify_functions[i].name}) has a size of 0")
+                full_output += f"[yellow]Skipping padding[/yellow]; Function at address {modify_functions[i].start} ({modify_functions[i].name}) has a size of 0\n"
             continue
 
         # Get end address of current function and start address of next function (to derive padding (patchable bytes))
@@ -193,22 +237,24 @@ def modify_bin_padding(
 
         # Check for duplicate function entries and functions with no padding between them and the next function
         if padding_start == next_start:
+            back_to_back_count += 1
             if verbose:
-                console.print(f"[blue]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/blue] [red](no padding following this function)[/red]")
+                full_output += f"[blue]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/blue] [red](no padding following this function)[/red]\n"
             continue
         elif padding_start > next_start:
+            duplicate_count += 1
             if verbose:
-                console.print(f"[blue]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/blue] [red](duplicate entry)[/red]")
+                full_output += f"[blue]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/blue] [red](duplicate entry)[/red]\n"
             continue
         else:
             if verbose:
-                console.print(f"[cyan]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/cyan] [magenta](padding: {padding_start} - {next_start})[/magenta]")
+                full_output += f"[cyan]Function {i}: {modify_functions[i].start} - {modify_functions[i].end}[/cyan] [magenta](padding: {padding_start} - {next_start})[/magenta]\n"
 
         # Ensure that the last byte of the function is in the follow list (if provided)
         last_byte = binary.get_content_from_virtual_address(end_addr, 1).tolist()[0]
         if (follow != [] and last_byte not in follow):
             if verbose:
-                console.print(f"[yellow]Skipping padding[/yellow]; last byte ({last_byte}) not in: {follow}")
+                full_output += f"[yellow]Skipping padding[/yellow]; last byte ({last_byte}) not in: {follow}\n"
             continue
 
         # If the random injection option was not selected, use the given byte sequence
@@ -216,12 +262,12 @@ def modify_bin_padding(
             # If the padding is smaller than the chosen byte string, skip
             if len(patchable_addrs) < len(byte_str):
                 if verbose:
-                    console.print(f"[yellow]Skipping padding[/yellow]; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})")
+                    full_output += f"[yellow]Skipping padding[/yellow]; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})\n"
                 continue
             # If the padding is equal or greater than the chosen byte string, use as many full repetitions of byte string as possible without overwriting
             else:
                 if verbose:
-                    console.print(f"Padding (original): {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                    full_output += f"Padding (original): {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}\n"
                           
                 full_byte_strs = len(patchable_addrs) // len(byte_str)
                 padding_overwrite = byte_str * full_byte_strs
@@ -230,12 +276,12 @@ def modify_bin_padding(
                 byte_write_count += len(padding_overwrite)
 
                 if verbose:
-                    console.print(f"Padding (patched):  {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                    full_output += f"Padding (patched):  {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}\n"
         
         # Otherwise, use random bytes for the entire length of the padding
         else:
             if verbose:
-                console.print(f"Padding (original): {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                full_output += f"Padding (original): {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}\n"
                       
             # Overwrite padding with random bytes
             padding_overwrite = []
@@ -246,19 +292,19 @@ def modify_bin_padding(
             byte_write_count += len(padding_overwrite)
 
             if verbose:
-                console.print(f"Padding (patched):  {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}")
+                full_output += f"Padding (patched):  {[custom_hex(x) for x in binary.get_content_from_virtual_address(padding_start, len(patchable_addrs))]}\n"
                 
     # Save the modified binary
     binary.write(str(output_path.resolve()))
 
     # Output metrics
-    console.print("\n")
-    console.print("-" * console.width)
-    console.print(f"[bold green]Binary modified and saved to:       {output_path}[/bold green]")
-    console.print(f"[bold green]Function padding sections modified: {func_modify_count} ({(func_modify_count / len(modify_functions) * 100):.4f}%)[/bold green]")
-    console.print(f"[bold green]Bytes (over)written:                {byte_write_count} ({(byte_write_count / binary.virtual_size * 100):.4f}%)[/bold green]")
-    console.print("-" * console.width)
-    return
+    full_output += "-" * console.width + "\n"
+    full_output += f"[bold green]Binary modified and saved to:       {output_path}[/bold green]\n"
+    full_output += f"[bold green]Function padding sections modified: {func_modify_count} ({(func_modify_count / len(modify_functions) * 100):.4f}%)[/bold green]\n"
+    full_output += f"[bold green]Bytes (over)written:                {byte_write_count} ({(byte_write_count / binary.virtual_size * 100):.4f}%)[/bold green]\n"
+    full_output += "-" * console.width + "\n"
+    lock_print(full_output)
+    return (func_modify_count, len(modify_functions), byte_write_count, binary.virtual_size, duplicate_count, back_to_back_count, zero_size_count)
 
 
 # def big_brain_modify_padding(bin: Path, out: Path):  # , new_byte:int):
