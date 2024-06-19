@@ -136,9 +136,9 @@ def edit_padding(
     #     modify_bin_padding(arg)
     
     # Process modification results (across entire dataset)
-    tot_func_modify, tot_total_func, tot_byte_write, tot_total_byte, tot_duplicate, tot_back_to_back, tot_zero_size = 0, 0, 0, 0, 0, 0, 0
+    tot_func_modify, tot_total_func, tot_byte_write, tot_total_byte, tot_duplicate, tot_back_to_back, tot_zero_size, tot_skipped = 0, 0, 0, 0, 0, 0, 0, 0
     for result in results:
-        func_modify, total_func, byte_write, total_byte, duplicate, back_to_back, zero_size = result.get()
+        func_modify, total_func, byte_write, total_byte, duplicate, back_to_back, zero_size, skipped = result.get()
         tot_func_modify += func_modify
         tot_total_func += total_func
         tot_byte_write += byte_write
@@ -146,6 +146,7 @@ def edit_padding(
         tot_duplicate += duplicate
         tot_back_to_back += back_to_back
         tot_zero_size += zero_size
+        tot_skipped += skipped
     
     # Format output
     output = "-" * console.width + "\n"
@@ -155,15 +156,16 @@ def edit_padding(
     output += f"[bold green]     Back-to-back functions:        [/bold green]{tot_back_to_back}\n"
     output += f"[bold green]     Duplicate functions:           [/bold green]{tot_duplicate}\n"
     output += f"[bold green]     Zero-size functions:           [/bold green]{tot_zero_size}\n"
+    output += f"[bold green]     Skipped functions:             [/bold green]{tot_skipped}\n"
     output += f"[bold green]Bytes (over)written:                [/bold green]{(tot_byte_write / tot_total_byte * 100):.4f}% ({tot_byte_write} of {tot_total_byte})\n"
-    output += "-" * console.width + "\n"
+    output += "-" * console.width
     console.print(output)
     return
 
 
 def modify_bin_padding(
     args: tuple[Path, List[int], Path, List[int], bool, bool]
-) -> tuple[int, int, int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int, int, int]:
     # Unpack arguments
     binary_path = args[0]
     byte_str = args[1]
@@ -209,11 +211,8 @@ def modify_bin_padding(
     # Sort function addresses
     modify_functions = sorted(modify_functions, key=lambda x: x.start)
     bin_start_addresses = sorted([x.addr for x in bin_analysis_functions])
-    func_modify_count = 0
-    byte_write_count = 0
-    duplicate_count = 0
-    back_to_back_count = 0
-    zero_size_count = 0
+    
+    func_modify_count, byte_write_count, duplicate_count, back_to_back_count, zero_size_count, skipped = 0, 0, 0, 0, 0, 0
 
     # Modify padding
     for i in range(len(modify_functions) - 1):
@@ -261,6 +260,7 @@ def modify_bin_padding(
         if not random_injection:
             # If the padding is smaller than the chosen byte string, skip
             if len(patchable_addrs) < len(byte_str):
+                skipped += 1
                 if verbose:
                     full_output += f"[yellow]Skipping padding[/yellow]; padding size ({len(patchable_addrs)}) is smaller than byte string size ({len(byte_str)})\n"
                 continue
@@ -296,15 +296,20 @@ def modify_bin_padding(
                 
     # Save the modified binary
     binary.write(str(output_path.resolve()))
+    total_func_count = len(modify_functions)
+    total_byte_count = binary.virtual_size
 
     # Output metrics
     full_output += "-" * console.width + "\n"
-    full_output += f"[bold green]Binary modified and saved to:       {output_path}[/bold green]\n"
-    full_output += f"[bold green]Function padding sections modified: {func_modify_count} ({(func_modify_count / len(modify_functions) * 100):.4f}%)[/bold green]\n"
-    full_output += f"[bold green]Bytes (over)written:                {byte_write_count} ({(byte_write_count / binary.virtual_size * 100):.4f}%)[/bold green]\n"
-    full_output += "-" * console.width + "\n"
+    full_output += f"[bold green]Function padding sections modified: [/bold green]{(func_modify_count / total_func_count * 100):.4f}% ({func_modify_count} of {total_func_count})\n"
+    full_output += f"[bold green]     Back-to-back functions:        [/bold green]{back_to_back_count}\n"
+    full_output += f"[bold green]     Duplicate functions:           [/bold green]{duplicate_count}\n"
+    full_output += f"[bold green]     Zero-size functions:           [/bold green]{zero_size_count}\n"
+    full_output += f"[bold green]     Skipped functions:             [/bold green]{skipped}\n"
+    full_output += f"[bold green]Bytes (over)written:                [/bold green]{(byte_write_count / total_byte_count * 100):.4f}% ({byte_write_count} of {total_byte_count})\n"
+    full_output += "-" * console.width
     lock_print(full_output)
-    return (func_modify_count, len(modify_functions), byte_write_count, binary.virtual_size, duplicate_count, back_to_back_count, zero_size_count)
+    return (func_modify_count, total_func_count, byte_write_count, total_byte_count, duplicate_count, back_to_back_count, zero_size_count, skipped)
 
 
 # def big_brain_modify_padding(bin: Path, out: Path):  # , new_byte:int):
