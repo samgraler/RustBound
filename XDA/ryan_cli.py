@@ -10,6 +10,7 @@ from typing_extensions import Annotated
 from fairseq.models.roberta import RobertaModel
 import torch
 import lief 
+import os
 from elftools.elf.elffile import ELFFile
 from dataclasses import dataclass, asdict
 from colorama import Fore, Back, Style
@@ -807,10 +808,7 @@ def gen_strip_file(bin_path:Path):
 
     return strip_bin
 
-
-
-
-
+#TODO:  Probably not used 
 @app.command()
 def read_log(
     bin_dir: Annotated[str, typer.Argument()],
@@ -828,16 +826,17 @@ def read_log(
         'size':0,
     }
 
-
     files = []
     for file in Path(res_dir).rglob('*'):
         for bin in Path(bin_dir).rglob('*'):
+            # Does not append directories
+            if bin.name.lower() == file.name.lower():
+                continue
             if bin.name.lower() in file.name.lower():
                 files.append((file,bin))
                 continue
         #if file.name.lower() in x.name.lower() for x in Path(bin_dir).rglob('*')):
             #files.append(file)
-
 
     tot_runtime = 0
     for (file,bin) in files:
@@ -877,6 +876,18 @@ def read_log(
     print(f"Prec: {prec}")
     print(f"Recall: {recall}")
     print(f"F1: {f1}")
+    return
+
+def safe_nump_save(data: np.ndarray, npz_file: Path):
+    '''
+    Read the memory mapped npz file to append the data to it 
+    '''
+    #npz_open_file= np.load(npz_file, mmap_mode="r")
+    #npz_data = npz_open_file[list(npz_open_file.keys())[0]]
+    matrix_mmap = np.memmap(npz_file, mode="r+" ),#dtype=npz_data.dtype, shape=npz_data.shape)
+
+    matrix_mmap.resize((matrix_mmap.shape[0] + data.shape[0], matrix_mmap.shape[1]))
+    npz_open_file.close()
     return
 
 
@@ -953,7 +964,7 @@ def raw_test(
         # Save the compressed matrix
         matrix_saved = sub_dir.joinpath(f"{bin_path.name}_result.npz")
         if matrix_saved.exists():
-            raise Exception("MAtix has been saved")
+            raise Exception("Matrix has been saved")
         
         np.savez(matrix_saved, tot_res)
         # For every 10,000 bytes saze it into its own array 
@@ -966,18 +977,20 @@ def raw_test(
             f.write(f"{runtime}")
     return
 
-def safe_nump_save(data: np.ndarray, npz_file: Path):
-    '''
-    Read the memory mapped npz file to append the data to it 
-    '''
-    #npz_open_file= np.load(npz_file, mmap_mode="r")
-    #npz_data = npz_open_file[list(npz_open_file.keys())[0]]
-    matrix_mmap = np.memmap(npz_file, mode="r+" ),#dtype=npz_data.dtype, shape=npz_data.shape)
-
-    matrix_mmap.resize((matrix_mmap.shape[0] + data.shape[0], matrix_mmap.shape[1]))
-    npz_open_file.close()
-    return
-
+def sum_runtimes(results_dir: Path) -> float:
+    total_runtime = 0.0
+    fc = 0
+    for file in results_dir.rglob('runtime.txt'):
+        fc += 1
+        try:
+            with file.open('r') as f:
+                runtime = float(f.read().strip())
+                total_runtime += runtime
+                print(f"{file.name} {fc} {runtime} {total_runtime}")
+        except ValueError:
+            print(f"Warning: Could not convert the contents of {file} to a float.")
+    
+    return total_runtime
 
 
 @app.command()
@@ -1061,7 +1074,7 @@ def read_bounds_raw(
         ends = gnd_truth.func_addrs + lengths_adjusted
         gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
                                     ends.T.reshape(-1,1)), axis=1)
-        #gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
+        # gnd_matrix = np.concatenate((gnd_truth.func_addrs.T.reshape(-1,1), 
         #                            gnd_truth.func_lens.T.reshape(-1,1)), axis=1)
 
         # 2 - Find the npz with the xda funcs and addrs, chop of functions that 
@@ -1254,14 +1267,15 @@ def read_bounds_raw(
             print(f"Bounds: {bound_conf}")
             print(f"Bounds Metrics: {calc_metrics(bound_conf)}")
 
+    total_runtime = sum_runtimes(Path(input_path))
 
     if out_dir != "":
         out_path = Path(out_dir)
         with open(out_path, 'w') as f:
-            json.dump(f, {'start' : asdict(total_start_conf),
-                      'end':     asdict(total_end_conf),
-                      'bound':   asdict(total_bound_conf),
-                       })
+            json.dump({'start': asdict(total_start_conf), 
+                          'end': asdict(total_end_conf),
+                          'bound': asdict(total_bound_conf),
+                          'runtime': total_runtime}, f)
 
     print(f"Starts Conf: {total_start_conf}")
     print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
@@ -1296,9 +1310,174 @@ def read_bounds_raw(
             bound_res = calc_metrics(total_bound_conf)
             bound_res_line = f" & ".join(str(val) for k, val in asdict(bound_res).items())
             f.write(bound_res_line+' \\\\ \n')
-
     return 
 
+@app.command()
+def test_and_evaluate(
+    bin_path: Annotated[str, typer.Argument(help="Path to the directory or file containing binary files for inference.")],
+    checkpoint_dir: Annotated[str, typer.Argument(help="Directory containing the model checkpoint files.")],
+    checkpoint: Annotated[str, typer.Argument(help="Specific checkpoint file to be used for loading the model.")],
+    raw_result_path: Annotated[str, typer.Argument(help="Directory where raw prediction results will be saved.")],
+    eval_result_path: Annotated[str, typer.Argument(help="Directory where evaluation is to be saved in JSON format. Default is empty, meaning no output will be saved.")],
+    check_for_existing_results: Annotated[bool, typer.Option(help="Flag to check for existing results during prediction and skip computation if found. Default is True.")] = True,
+    verbose: Annotated[bool, typer.Option(help="Flag to enable verbose output during evaluation. Default is False.")] = False,
+    suppress_warn: Annotated[bool, typer.Option(help="Flag to suppress warnings during evaluation. Default is False.")] = False,
+    tex_charts: Annotated[str, typer.Option(help="Optional path to save evaluation metrics in LaTeX format. Default is empty, meaning no LaTeX output will be saved.")] = "",
+) -> str:
+    """
+    Function to perform inference on a given dataset and evaluate the results, making use of raw-test and read-bounds-raw
+    """
+    full_output = ""
+
+    # Step 1: Run raw_test to perform inference and save raw predictions
+    full_output += f"Executing `raw-test` command to perform inferencing on the given dataset.\n"
+    full_output += "Command executed (equivalent): `python ryan_cli.py raw-test "
+    full_output += "--no-check-for-existing-results " if not check_for_existing_results else "" 
+    full_output += f"{bin_path} {checkpoint_dir} {checkpoint} {raw_result_path}`\n"
+    raw_test(
+        bins=bin_path,
+        checkpoint_dir=checkpoint_dir,
+        checkpoint=checkpoint,
+        result_path=raw_result_path,
+        check_for_existing_results=check_for_existing_results
+    )
+
+    # Step 2: Run read_bounds_raw to read and evaluate the raw predictions
+    full_output += f"\nExecuting `read-bounds-raw` command to perform inferencing on the given dataset.\n"
+    full_output += "Command executed (equivalent): `python ryan_cli.py raw-test "
+    full_output += "--verbose " if verbose else ""
+    full_output += "--supress-warn " if suppress_warn else ""   
+    full_output += f"--out-dir {eval_result_path} "   
+    full_output += f"--tex-charts  {tex_charts} " if tex_charts != "" else ""
+    full_output += f"{raw_result_path} {bin_path}`\n"
+    read_bounds_raw(
+        input_path=Path(raw_result_path),
+        bin_path=Path(bin_path),
+        verbose=verbose,
+        supress_warn=suppress_warn,
+        out_dir=eval_result_path,
+        tex_charts=Path(tex_charts)
+    )
+
+    return full_output
+
+
+@app.command()
+def modify_test_evaluate(
+    bin_path: Annotated[str, typer.Argument(help="Directory or file containing binary files to modify")],
+    opt_level: Annotated[str, typer.Argument(help="Optimization level of the binaries in the dataset")],
+    mod_type: Annotated[str, typer.Argument(help="Name of modification pattern (for file/directory names), enter `random` for --random-injection flag")],
+    bytestring: Annotated[str, typer.Argument(help="Byte pattern to inject, write in hex separated by comma (e.g. 90,90: nop,nop for x86-64)")],
+    result_path: Annotated[str, typer.Argument(help="Directory where raw prediction results and evaluation will be saved.")],
+    must_follow: Annotated[str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by commas (e.g. c3,00,ff)")] = "",
+    verbose_mod: Annotated[bool, typer.Option(help="Flag to enable verbose output during modification. Default is False.")] = False,
+    check_for_existing_results: Annotated[bool, typer.Option(help="Flag to check for existing results during prediction and skip computation if found. Default is True.")] = True,
+    verbose_eval: Annotated[bool, typer.Option(help="Flag to enable verbose output during evaluation. Default is False.")] = False,
+    suppress_warn: Annotated[bool, typer.Option(help="Flag to suppress warnings during evaluation. Default is False.")] = False,
+    tex_charts: Annotated[str, typer.Option(help="Optional path to save evaluation metrics in LaTeX format. Default is empty, meaning no LaTeX output will be saved.")] = "",
+    overwrite: Annotated[bool, typer.Option(help="Flag to signal that existing results should be overwritten. Default is False, and should only be changed with caution")] = False
+):
+    """
+    Function to modify a given dataset (edit-padding), perform inference on said dataset (raw-test), and evaluate the results (read-bounds-raw). 
+    
+    This function should only be used
+    by a user who thoroughly understands the three commands mentioned above. This command bridges the functionality of the ripkit and XDA githubs, so in order for this command to function,
+    the two folders must be located in the same parent directory (e.g. ~/ghPackages/BoundDetector). This command handles transferring between virtual environments and creating directories as
+    necessary. 
+    
+    This command has several hard coded paths, as it is only built to expedite the collection of results on our specific server. In a different directory structure, more arguments
+    can be added, or the hard coded paths can be modified.
+    """
+    full_output = ""
+
+    # Step 0: Handle directories and error check input (don't want to start extended commands if arguments/options are incorrect)
+    if not Path(bin_path).exists():
+        full_output += f"ERROR: The bin directory does not exist:\n{bin_path}\n"
+
+    mod_out_path = Path(f"~/ghPackages/BoundDetector/{opt_level}_nonstripped_{mod_type}_mod").expanduser().resolve()
+    raw_result_path = Path(f"{result_path}/raw/{mod_type}").resolve()
+    eval_result_path = Path(f"{result_path}/results/{mod_type}.txt").resolve()
+    dir_paths = [mod_out_path, raw_result_path, eval_result_path]
+
+    for path in dir_paths:
+        if path.exists():
+            if not overwrite:
+                full_output += f"ERROR: The following result directories/files exist, but the overwrite flag was not set to true:\n{path}\n"
+        else:
+            path.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_dir = Path(f"~/ghPackages/BoundDetector/model_weights/xda/{opt_level.lower()}/checkpoints/funcbound").expanduser().resolve()
+    checkpoint = "checkpoint_best.pt"
+    if not Path(f"{checkpoint_dir}/{checkpoint}").exists():
+        full_output += f"ERROR: The given checkpoint does not exist:\n{checkpoint_dir}{checkpoint}\n"
+
+    if full_output != "":
+        print(full_output)
+        return
+    
+    full_output += "Given arguments/options passed initial check.\n"
+    full_output += "Executing modify edit-padding command:\n"
+    
+    # Step 1: Build and execute the modify edit-padding command in a subprocess
+    
+    # first part of modify edit-padding command (directory and virtual environment steup)
+    cmd = f"cd {Path.cwd()} && cd ../ripkit && poetry shell && "
+    # second part is the actual edit-padding command
+    cmd += f"python ripkit/main.py modify edit-padding "
+    cmd += f"--verbose " if verbose_mod else ""
+    cmd += f"--must-follow {must_follow} " if must_follow != "" else ""
+    cmd += f"--random-injection " if mod_type == random else ""
+    cmd += f"{bin_path} {mod_out_path} {bytestring}"
+
+    # Write commands to a shell script and make executable
+    script_path = Path("~/temp_commands.sh").expanduser().resolve()
+    with open(script_path, 'w') as f:
+        f.write("#!/bin/bash\n")
+        f.write(cmd + "\n")
+    os.chmod(script_path, 0o755)
+
+    full_output += f"Command executed: `{cmd}`"
+    #TODO: Figure out how to deal with the differing python versions (maybe change conda environment? maybe change ripkit poetry requirement? figure something else out?)
+    try:
+        process = subprocess.Popen([str(script_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = process.communicate()
+        if stdout:
+            print("STDOUT:\n", stdout)
+        if stderr:
+            print("STDERR:\n", stderr)
+
+    except Exception as e:
+        print(f"ERROR In navigating to ripkit env/modify edit-padding command {e}")
+        return
+
+    # # Step 2: Build and execute command to return to XDA directory/virtual environment
+    # cmd = f"cd {Path.cwd()} && exit && cd ../XDA && conda activate xda"
+    # try:
+    #     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    #     stdout, stderr = process.communicate()
+    #     if stdout:
+    #         print("STDOUT:\n", stdout)
+    #     if stderr:
+    #         print("STDERR:\n", stderr)
+    
+    # except Exception as e:
+    #     print(f"ERROR In returning to XDA env {e}")
+    #     return
+
+    # Step 2: Run test_and evaluate command with the given and derived arguments/options to conduct and evalute inference
+    full_output += "Modify command succeeded.\n"
+    full_output += "Starting test-and-evaluate process:\n"
+    full_output += test_and_evaluate(mod_out_path, checkpoint_dir, checkpoint, raw_result_path, eval_result_path, check_for_existing_results, verbose_eval, suppress_warn, tex_charts)
+
+    # Step 3: Create log file in result_path and record output
+    log_path = Path(f"{result_path}/modify_test_eval_log.txt").expanduser().resolve()
+    with open(log_path, 'w') as f:
+        f.write(full_output)
+    
+    print(full_output)
+    print(f"Copy of commands can be found in log file: {log_path}")
+
+    return
 
 
 
@@ -1308,7 +1487,6 @@ def read_xda_npz(inp: Path)->np.ndarray:
     '''
     npz_file = np.load(inp)
     return npz_file[list(npz_file.keys())[0]]
-
 
 
 #@app.command()
@@ -1399,7 +1577,6 @@ def chunkwise_hamming_distance(pred_file, gnd, chunk_size=1024):
     
     # Normalize the total distance by the total number of elements.
     return total_distance / total_elements if total_elements else 0
-
 
 
 def jaccard_similarity(inp1:np.ndarray, inp2:np.ndarray):
