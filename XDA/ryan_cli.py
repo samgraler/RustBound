@@ -979,14 +979,11 @@ def raw_test(
 
 def sum_runtimes(results_dir: Path) -> float:
     total_runtime = 0.0
-    fc = 0
     for file in results_dir.rglob('runtime.txt'):
-        fc += 1
         try:
             with file.open('r') as f:
                 runtime = float(f.read().strip())
                 total_runtime += runtime
-                print(f"{file.name} {fc} {runtime} {total_runtime}")
         except ValueError:
             print(f"Warning: Could not convert the contents of {file} to a float.")
     
@@ -1313,7 +1310,7 @@ def read_bounds_raw(
     return 
 
 @app.command()
-def test_and_evaluate(
+def  test_and_evaluate(
     bin_path: Annotated[str, typer.Argument(help="Path to the directory or file containing binary files for inference.")],
     checkpoint_dir: Annotated[str, typer.Argument(help="Directory containing the model checkpoint files.")],
     checkpoint: Annotated[str, typer.Argument(help="Specific checkpoint file to be used for loading the model.")],
@@ -1328,36 +1325,28 @@ def test_and_evaluate(
     Function to perform inference on a given dataset and evaluate the results, making use of raw-test and read-bounds-raw
     """
     full_output = ""
+    out_chunk = "-" * console.width + "\n"
+    out_chunk += "Test and Evaluate" + "\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += "-" * console.width + "\n"
 
     # Step 1: Run raw_test to perform inference and save raw predictions
-    full_output += f"Executing `raw-test` command to perform inferencing on the given dataset.\n"
-    full_output += "Command executed (equivalent): `python ryan_cli.py raw-test "
-    full_output += "--no-check-for-existing-results " if not check_for_existing_results else "" 
-    full_output += f"{bin_path} {checkpoint_dir} {checkpoint} {raw_result_path}`\n"
-    raw_test(
-        bins=bin_path,
-        checkpoint_dir=checkpoint_dir,
-        checkpoint=checkpoint,
-        result_path=raw_result_path,
-        check_for_existing_results=check_for_existing_results
-    )
+    cmd = gen_raw_test_cmd(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results)
+    out_chunk += f"Raw Test:\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += f"Command executed (equivalent): {cmd}\n"
+    full_output = record_and_print(full_output, out_chunk)
+    raw_test(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results)
 
     # Step 2: Run read_bounds_raw to read and evaluate the raw predictions
-    full_output += f"\nExecuting `read-bounds-raw` command to perform inferencing on the given dataset.\n"
-    full_output += "Command executed (equivalent): `python ryan_cli.py raw-test "
-    full_output += "--verbose " if verbose else ""
-    full_output += "--supress-warn " if suppress_warn else ""   
-    full_output += f"--out-dir {eval_result_path} "   
-    full_output += f"--tex-charts  {tex_charts} " if tex_charts != "" else ""
-    full_output += f"{raw_result_path} {bin_path}`\n"
-    read_bounds_raw(
-        input_path=Path(raw_result_path),
-        bin_path=Path(bin_path),
-        verbose=verbose,
-        supress_warn=suppress_warn,
-        out_dir=eval_result_path,
-        tex_charts=Path(tex_charts)
-    )
+    cmd = gen_read_bounds_raw_cmd(raw_result_path, bin_path, verbose, suppress_warn, eval_result_path, tex_charts)
+    out_chunk = "-" * console.width + "\n"
+    out_chunk += f"Read Bounds Raw:\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += f"Command executed (equivalent): {cmd}\n"
+    out_chunk += "-" * console.width + "\n"
+    full_output = record_and_print(full_output, out_chunk)
+    read_bounds_raw(Path(raw_result_path), Path(bin_path), verbose, suppress_warn, eval_result_path, Path(tex_charts))
 
     return full_output
 
@@ -1371,115 +1360,179 @@ def modify_test_evaluate(
     result_path: Annotated[str, typer.Argument(help="Directory where raw prediction results and evaluation will be saved.")],
     must_follow: Annotated[str, typer.Option(help="What the last byte of a function must be to allow padding modification. Write in hex separated by commas (e.g. c3,00,ff)")] = "",
     verbose_mod: Annotated[bool, typer.Option(help="Flag to enable verbose output during modification. Default is False.")] = False,
-    check_for_existing_results: Annotated[bool, typer.Option(help="Flag to check for existing results during prediction and skip computation if found. Default is True.")] = True,
     verbose_eval: Annotated[bool, typer.Option(help="Flag to enable verbose output during evaluation. Default is False.")] = False,
     suppress_warn: Annotated[bool, typer.Option(help="Flag to suppress warnings during evaluation. Default is False.")] = False,
     tex_charts: Annotated[str, typer.Option(help="Optional path to save evaluation metrics in LaTeX format. Default is empty, meaning no LaTeX output will be saved.")] = "",
-    overwrite: Annotated[bool, typer.Option(help="Flag to signal that existing results should be overwritten. Default is False, and should only be changed with caution")] = False
+    delete_existing: Annotated[bool, typer.Option(help="Flag to delete existing results before running the command (Use with caution). Default is False.")] = False,
 ):
     """
     Function to modify a given dataset (edit-padding), perform inference on said dataset (raw-test), and evaluate the results (read-bounds-raw). 
     
-    This function should only be used
-    by a user who thoroughly understands the three commands mentioned above. This command bridges the functionality of the ripkit and XDA githubs, so in order for this command to function,
-    the two folders must be located in the same parent directory (e.g. ~/ghPackages/BoundDetector). This command handles transferring between virtual environments and creating directories as
-    necessary. 
+    This function should only be used by a user who thoroughly understands the three commands mentioned above. This command bridges the functionality of the ripkit and XDA githubs, 
+    so in order for this command to function, the two folders must be located in the same parent directory (e.g. ~/ghPackages/BoundDetector). Additionally, this command requires a 
+    combination of the virtual environments used by XDA and ripkit, so it must be run from the xda3.10 virtual environment (uses python 3.10, contains both xda and ripkit dependencies)
     
     This command has several hard coded paths, as it is only built to expedite the collection of results on our specific server. In a different directory structure, more arguments
     can be added, or the hard coded paths can be modified.
     """
     full_output = ""
+    error_output = ""
+
+    out_chunk = "-" * console.width + "\n"
+    out_chunk += "Modify, Test, Evaluate:\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += f"Command executed: {gen_modify_test_eval_cmd(bin_path, opt_level, mod_type, bytestring, result_path, must_follow, verbose_mod, verbose_eval, suppress_warn, tex_charts, delete_existing)}\n"
 
     # Step 0: Handle directories and error check input (don't want to start extended commands if arguments/options are incorrect)
-    if not Path(bin_path).exists():
-        full_output += f"ERROR: The bin directory does not exist:\n{bin_path}\n"
+    log_dir = Path(f"{result_path}/{opt_level}/logs").expanduser().resolve()
+    if not log_dir.exists():
+        log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = Path(f"{log_dir}/{mod_type}.txt").resolve()
+    if log_path.exists():
+        log_path.unlink() 
+    log_path.touch()
+
+    bin_path = Path(bin_path).resolve()
+    if not bin_path.exists():
+        error_output += f"ERROR: The bin directory does not exist:\n{bin_path}\n"
+
+    if delete_existing:
+        if result_path.find("../") != -1:
+            error_output += f"ERROR: The --delete-existing flag cannot be used with relative paths.\n"
+            print(out_chunk + error_output)
+            return
 
     mod_out_path = Path(f"~/ghPackages/BoundDetector/{opt_level}_nonstripped_{mod_type}_mod").expanduser().resolve()
-    raw_result_path = Path(f"{result_path}/raw/{mod_type}").resolve()
-    eval_result_path = Path(f"{result_path}/results/{mod_type}.txt").resolve()
-    dir_paths = [mod_out_path, raw_result_path, eval_result_path]
+    raw_result_path = Path(f"{result_path}/{opt_level}/raw/{mod_type}").resolve()
+    dir_paths = [mod_out_path, raw_result_path]
 
     for path in dir_paths:
         if path.exists():
-            if not overwrite:
-                full_output += f"ERROR: The following result directories/files exist, but the overwrite flag was not set to true:\n{path}\n"
-        else:
-            path.mkdir(parents=True, exist_ok=True)
+            if delete_existing:
+                shutil.rmtree(path)
+            else:
+                error_output += f"ERROR: The following result directories/files exist, but the --delete-existing flag was not set:\n{path}\n"
+                continue
+        path.mkdir(parents=True, exist_ok=True)
+
+    eval_result_dir = Path(f"{result_path}/{opt_level}/results").resolve()
+    eval_result_path = Path(f"{result_path}/{opt_level}/results/{mod_type}.txt").resolve()
+
+    if not delete_existing and eval_result_path.exists():
+        error_output += f"ERROR: The evaluation result file already exists, please specify a different mod type or delete the existing file:\n{eval_result_path}\n"
+    elif delete_existing and eval_result_path.exists():
+        eval_result_path.unlink()
+        eval_result_path.touch()
+    else:
+        eval_result_dir.mkdir(parents=True, exist_ok=True)
+        eval_result_path.touch()
 
     checkpoint_dir = Path(f"~/ghPackages/BoundDetector/model_weights/xda/{opt_level.lower()}/checkpoints/funcbound").expanduser().resolve()
     checkpoint = "checkpoint_best.pt"
     if not Path(f"{checkpoint_dir}/{checkpoint}").exists():
-        full_output += f"ERROR: The given checkpoint does not exist:\n{checkpoint_dir}{checkpoint}\n"
+        error_output += f"ERROR: The given checkpoint does not exist:\n{checkpoint_dir}{checkpoint}\n"
 
-    if full_output != "":
-        print(full_output)
+    if error_output != "":
+        out_chunk += error_output
+        full_output = record_and_print(full_output, out_chunk)
+        write_to_log_file(log_path, full_output)
         return
     
-    full_output += "Given arguments/options passed initial check.\n"
-    full_output += "Executing modify edit-padding command:\n"
+    out_chunk += "Directory paths created successfully.\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += "Modify (edit-padding)" + "\n"
+    out_chunk += "-" * console.width + "\n"
+    out_chunk += "-" * console.width + "\n"
     
-    # Step 1: Build and execute the modify edit-padding command in a subprocess
+    # Step 1: Build and execute the modify edit-padding command in a subproces
+
+    # TODO: Figure out a way to write the dataset modification statistics to the log file (for now just wait a few minutes for the output of the edit-padding command
+    #       to be written to the console and manually record the statistics)
     
-    # first part of modify edit-padding command (directory and virtual environment steup)
-    cmd = f"cd {Path.cwd()} && cd ../ripkit && poetry shell && "
-    # second part is the actual edit-padding command
-    cmd += f"python ripkit/main.py modify edit-padding "
+    cmd = f"cd ../ripkit && "
+    cmd += gen_edit_padding_cmd(bin_path, mod_out_path, bytestring, mod_type, must_follow, verbose_mod)
+    out_chunk += f"Command executed: {cmd}\n"
+    full_output = record_and_print(full_output, out_chunk)
+    print("NOTE: output will print after command completes (ripkit edit-padding command is run in subprocess)")
+    try:
+        run_cmd_in_subprocess(cmd)
+    except Exception as e:
+        full_output += f"ERROR: Modify command failed: {e}\n"
+        write_to_log_file(log_path, full_output)
+        print(f"{e}")
+        return
+
+    # Step 2: Run test-and-evaluate command with the given/derived arguments/options to conduct and evalute inference
+    print("Modify command succeeded\n")
+    try:
+        out_chunk += test_and_evaluate(mod_out_path, checkpoint_dir, checkpoint, raw_result_path, eval_result_path, True, verbose_eval, suppress_warn, tex_charts)
+    except Exception as e:
+        out_chunk += f"ERROR: Test and evaluate command failed: {e}\n"
+        full_output += out_chunk
+        write_to_log_file(log_path, full_output)
+        print(f"{e}")
+        return
+    
+    # Step 3: Write output to log file in result_path
+    full_output += out_chunk
+    write_to_log_file(log_path, full_output)
+    return
+
+def run_cmd_in_subprocess(cmd: str):
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
+    stdout, stderr = process.communicate()
+    if stdout:
+        print(stdout)
+    if stderr:
+        print(stderr)
+        raise Exception(f"{stderr}")
+    return
+
+def write_to_log_file(file: Path, msg: str):
+    with open(file, 'a') as f:
+        f.write(msg)
+    print(f"\nOutput written to log file: {file}\n")
+    return
+
+def record_and_print(fullout: str, msg: str) -> str:
+    fullout += msg
+    print(msg)
+    return fullout
+
+def gen_modify_test_eval_cmd(bin_path, opt_level, mod_type, bytestring, result_path, must_follow, verbose_mod, verbose_eval, suppress_warn, tex_charts, delete_existing) -> str:
+    cmd = "python ryan_cli.py modify_test_evaluate "
+    cmd += f"--verbose-mod " if verbose_mod else ""
+    cmd += f"--delete-existing " if delete_existing else ""
+    cmd += f"--must-follow {must_follow} " if must_follow != "" else ""
+    cmd += f"--verbose-eval " if verbose_eval else ""
+    cmd += f"--suppress-warn " if suppress_warn else ""
+    cmd += f"--tex-charts {tex_charts} " if tex_charts != "" else ""
+    cmd += f"{bin_path} {opt_level} {mod_type} {bytestring} {result_path} "
+    return cmd
+
+def gen_raw_test_cmd(bins, checkpoint_dir, checkpoint, result_path, check_for_existing_results) -> str:
+    cmd = "python ryan_cli.py raw-test "
+    cmd += f"--no-check-for-existing-results " if not check_for_existing_results else ""
+    cmd += f"{bins} {checkpoint_dir} {checkpoint} {result_path}"
+    return cmd
+
+def gen_read_bounds_raw_cmd(input_path, bin_path, verbose, supress_warn, out_dir, tex_charts) -> str:
+    cmd = "python ryan_cli.py read-bounds-raw "
+    cmd += f"--verbose " if verbose else ""
+    cmd += f"--supress-warn " if supress_warn else ""
+    cmd += f"--out-dir {out_dir} " if out_dir != "" else ""
+    cmd += f"--tex-charts {tex_charts} " if tex_charts != "" else ""
+    cmd += f"{input_path} {bin_path}"
+    return cmd
+
+def gen_edit_padding_cmd(bin_path, mod_out_path, bytestring, mod_type, must_follow, verbose_mod) -> str:
+    cmd = "python ripkit/main.py modify edit-padding "
     cmd += f"--verbose " if verbose_mod else ""
     cmd += f"--must-follow {must_follow} " if must_follow != "" else ""
     cmd += f"--random-injection " if mod_type == random else ""
     cmd += f"{bin_path} {mod_out_path} {bytestring}"
-
-    # Write commands to a shell script and make executable
-    script_path = Path("~/temp_commands.sh").expanduser().resolve()
-    with open(script_path, 'w') as f:
-        f.write("#!/bin/bash\n")
-        f.write(cmd + "\n")
-    os.chmod(script_path, 0o755)
-
-    full_output += f"Command executed: `{cmd}`"
-    #TODO: Figure out how to deal with the differing python versions (maybe change conda environment? maybe change ripkit poetry requirement? figure something else out?)
-    try:
-        process = subprocess.Popen([str(script_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = process.communicate()
-        if stdout:
-            print("STDOUT:\n", stdout)
-        if stderr:
-            print("STDERR:\n", stderr)
-
-    except Exception as e:
-        print(f"ERROR In navigating to ripkit env/modify edit-padding command {e}")
-        return
-
-    # # Step 2: Build and execute command to return to XDA directory/virtual environment
-    # cmd = f"cd {Path.cwd()} && exit && cd ../XDA && conda activate xda"
-    # try:
-    #     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    #     stdout, stderr = process.communicate()
-    #     if stdout:
-    #         print("STDOUT:\n", stdout)
-    #     if stderr:
-    #         print("STDERR:\n", stderr)
-    
-    # except Exception as e:
-    #     print(f"ERROR In returning to XDA env {e}")
-    #     return
-
-    # Step 2: Run test_and evaluate command with the given and derived arguments/options to conduct and evalute inference
-    full_output += "Modify command succeeded.\n"
-    full_output += "Starting test-and-evaluate process:\n"
-    full_output += test_and_evaluate(mod_out_path, checkpoint_dir, checkpoint, raw_result_path, eval_result_path, check_for_existing_results, verbose_eval, suppress_warn, tex_charts)
-
-    # Step 3: Create log file in result_path and record output
-    log_path = Path(f"{result_path}/modify_test_eval_log.txt").expanduser().resolve()
-    with open(log_path, 'w') as f:
-        f.write(full_output)
-    
-    print(full_output)
-    print(f"Copy of commands can be found in log file: {log_path}")
-
-    return
-
-
+    return cmd
 
 def read_xda_npz(inp: Path)->np.ndarray:
     '''
