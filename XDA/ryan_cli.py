@@ -1400,9 +1400,6 @@ def modify_test_evaluate(
     if not log_dir.exists():
         log_dir.mkdir(parents=True, exist_ok=True)
     log_path = Path(f"{log_dir}/{mod_type}.txt").resolve()
-    if log_path.exists():
-        log_path.unlink() 
-    log_path.touch()
 
     bin_path = Path(bin_path).resolve()
     if not bin_path.exists():
@@ -1428,7 +1425,6 @@ def modify_test_evaluate(
             else:
                 # error_output += f"The following result directories/files are present:\n{path}\n"
                 continue
-        path.mkdir(parents=True, exist_ok=True)
 
     eval_result_dir = Path(f"{result_path}/{opt_level}/results").resolve()
     eval_result_path = Path(f"{result_path}/{opt_level}/results/{mod_type}.txt").resolve()
@@ -1458,10 +1454,12 @@ def modify_test_evaluate(
     # Step 1: Build and execute the modify edit-padding command in a subproces
 
     if mod_out_path.exists():
-        out_chunk += "WARNING: The modified directory already exists and --delete-existing flag is not present. Existing dataset will be used, skipping edit-padding command.\n"
+        out_chunk += f"WARNING: The modified directory already exists and --delete-existing flag is not present: {mod_out_path}\n"
+        out_chunk += "Existing dataset will be used, skipping edit-padding command.\n"
         full_output = record_and_print(full_output, out_chunk)
         out_chunk = ""
     else: 
+        mod_out_path.mkdir(parents=True, exist_ok=True)
         cmd = f"cd ../ripkit && "
         cmd += gen_edit_padding_cmd(bin_path, mod_out_path, bytestring, mod_type, must_follow, verbose_mod)
         out_chunk += f"Command executed: [bold cyan]{cmd}[/bold cyan]\n"
