@@ -28,6 +28,7 @@ from rich.table import Table
 from rich.progress import track
 
 console = Console()
+console.width = console.width - 10
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 @dataclass 
@@ -1266,20 +1267,30 @@ def read_bounds_raw(
 
     total_runtime = sum_runtimes(Path(input_path))
 
+    start_metrics = calc_metrics(total_start_conf)
+    end_metrics = calc_metrics(total_end_conf)
+    bound_metrics = calc_metrics(total_bound_conf)
+
     if out_dir != "":
         out_path = Path(out_dir)
         with open(out_path, 'w') as f:
-            json.dump({'start': asdict(total_start_conf), 
-                          'end': asdict(total_end_conf),
-                          'bound': asdict(total_bound_conf),
-                          'runtime': total_runtime}, f)
+            json.dump({'start': {
+                            'conf_matrix': asdict(total_start_conf), 
+                            'metrics': asdict(start_metrics)}, 
+                        'end': { 
+                            'conf_matrix': asdict(total_end_conf),
+                            'metrics': asdict(end_metrics)}, 
+                        'bound': { 
+                            'conf_matrix': asdict(total_bound_conf),
+                            'metrics': asdict(bound_metrics)}, 
+                        'runtime': total_runtime}, f)
 
     print(f"Starts Conf: {total_start_conf}")
-    print(f"Starts Metrics: {calc_metrics(total_start_conf)}")
+    print(f"Starts Metrics: {start_metrics}")
     print(f"Ends Conf: {total_end_conf}")
-    print(f"Ends Metrics: {calc_metrics(total_end_conf)}")
+    print(f"Ends Metrics: {end_metrics}")
     print(f"Bounds Conf: {total_bound_conf}")
-    print(f"Bounds Metrics: {calc_metrics(total_bound_conf)}")
+    print(f"Bounds Metrics: {bound_metrics}")
 
     if tex_charts != Path(""):
         with open(tex_charts, 'w') as f:
@@ -1334,7 +1345,7 @@ def  test_and_evaluate(
     cmd = gen_raw_test_cmd(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results)
     out_chunk += f"Raw Test:\n"
     out_chunk += "-" * console.width + "\n"
-    out_chunk += f"Command executed (equivalent): {cmd}\n"
+    out_chunk += f"Command executed (equivalent): [bold cyan]{cmd}[/bold cyan]\n"
     full_output = record_and_print(full_output, out_chunk)
     raw_test(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results)
 
@@ -1343,7 +1354,7 @@ def  test_and_evaluate(
     out_chunk = "-" * console.width + "\n"
     out_chunk += f"Read Bounds Raw:\n"
     out_chunk += "-" * console.width + "\n"
-    out_chunk += f"Command executed (equivalent): {cmd}\n"
+    out_chunk += f"Command executed (equivalent): [bold cyan]{cmd}[/bold cyan]\n"
     out_chunk += "-" * console.width + "\n"
     full_output = record_and_print(full_output, out_chunk)
     read_bounds_raw(Path(raw_result_path), Path(bin_path), verbose, suppress_warn, eval_result_path, Path(tex_charts))
@@ -1382,7 +1393,7 @@ def modify_test_evaluate(
     out_chunk += "Modify, Test, Evaluate:\n"
     out_chunk += "-" * console.width + "\n"
     out_chunk += "-" * console.width + "\n"
-    out_chunk += f"Command executed: {gen_modify_test_eval_cmd(bin_path, opt_level, mod_type, bytestring, result_path, must_follow, verbose_mod, verbose_eval, suppress_warn, tex_charts, delete_existing)}\n"
+    out_chunk += f"Command executed: [bold cyan]{gen_modify_test_eval_cmd(bin_path, opt_level, mod_type, bytestring, result_path, must_follow, verbose_mod, verbose_eval, suppress_warn, tex_charts, delete_existing)}[/bold cyan]\n"
 
     # Step 0: Handle directories and error check input (don't want to start extended commands if arguments/options are incorrect)
     log_dir = Path(f"{result_path}/{opt_level}/logs").expanduser().resolve()
@@ -1396,6 +1407,8 @@ def modify_test_evaluate(
     bin_path = Path(bin_path).resolve()
     if not bin_path.exists():
         error_output += f"ERROR: The bin directory does not exist:\n{bin_path}\n"
+        print(out_chunk + error_output)
+        return
 
     if delete_existing:
         if result_path.find("../") != -1:
@@ -1410,22 +1423,19 @@ def modify_test_evaluate(
     for path in dir_paths:
         if path.exists():
             if delete_existing:
+                out_chunk += f"Deleting existing directory: {path}\n"
                 shutil.rmtree(path)
             else:
-                error_output += f"ERROR: The following result directories/files exist, but the --delete-existing flag was not set:\n{path}\n"
+                # error_output += f"The following result directories/files are present:\n{path}\n"
                 continue
         path.mkdir(parents=True, exist_ok=True)
 
     eval_result_dir = Path(f"{result_path}/{opt_level}/results").resolve()
     eval_result_path = Path(f"{result_path}/{opt_level}/results/{mod_type}.txt").resolve()
 
-    if not delete_existing and eval_result_path.exists():
-        error_output += f"ERROR: The evaluation result file already exists, please specify a different mod type or delete the existing file:\n{eval_result_path}\n"
-    elif delete_existing and eval_result_path.exists():
-        eval_result_path.unlink()
-        eval_result_path.touch()
-    else:
+    if not eval_result_dir.exists():
         eval_result_dir.mkdir(parents=True, exist_ok=True)
+    if not eval_result_path.exists():
         eval_result_path.touch()
 
     checkpoint_dir = Path(f"~/ghPackages/BoundDetector/model_weights/xda/{opt_level.lower()}/checkpoints/funcbound").expanduser().resolve()
@@ -1439,7 +1449,7 @@ def modify_test_evaluate(
         write_to_log_file(log_path, full_output)
         return
     
-    out_chunk += "Directory paths created successfully.\n"
+    out_chunk += "\nDirectory paths created successfully.\n"
     out_chunk += "-" * console.width + "\n"
     out_chunk += "Modify (edit-padding)" + "\n"
     out_chunk += "-" * console.width + "\n"
@@ -1447,21 +1457,24 @@ def modify_test_evaluate(
     
     # Step 1: Build and execute the modify edit-padding command in a subproces
 
-    # TODO: Figure out a way to write the dataset modification statistics to the log file (for now just wait a few minutes for the output of the edit-padding command
-    #       to be written to the console and manually record the statistics)
-    
-    cmd = f"cd ../ripkit && "
-    cmd += gen_edit_padding_cmd(bin_path, mod_out_path, bytestring, mod_type, must_follow, verbose_mod)
-    out_chunk += f"Command executed: {cmd}\n"
-    full_output = record_and_print(full_output, out_chunk)
-    print("NOTE: output will print after command completes (ripkit edit-padding command is run in subprocess)")
-    try:
-        run_cmd_in_subprocess(cmd)
-    except Exception as e:
-        full_output += f"ERROR: Modify command failed: {e}\n"
-        write_to_log_file(log_path, full_output)
-        print(f"{e}")
-        return
+    if mod_out_path.exists():
+        out_chunk += "WARNING: The modified directory already exists and --delete-existing flag is not present. Existing dataset will be used, skipping edit-padding command.\n"
+        full_output = record_and_print(full_output, out_chunk)
+        out_chunk = ""
+    else: 
+        cmd = f"cd ../ripkit && "
+        cmd += gen_edit_padding_cmd(bin_path, mod_out_path, bytestring, mod_type, must_follow, verbose_mod)
+        out_chunk += f"Command executed: [bold cyan]{cmd}[/bold cyan]\n"
+        full_output = record_and_print(full_output, out_chunk)
+        out_chunk = ""
+        print("NOTE: output will print after command completes (ripkit edit-padding command is run in subprocess)")
+        try:
+            run_cmd_in_subprocess(cmd)
+        except Exception as e:
+            full_output += f"ERROR: Modify command failed: {e}\n"
+            write_to_log_file(log_path, full_output)
+            print(f"{e}")
+            return
 
     # Step 2: Run test-and-evaluate command with the given/derived arguments/options to conduct and evalute inference
     print("Modify command succeeded\n")
@@ -1483,9 +1496,9 @@ def run_cmd_in_subprocess(cmd: str):
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
     stdout, stderr = process.communicate()
     if stdout:
-        print(stdout)
+        console.print(stdout)
     if stderr:
-        print(stderr)
+        console.print(stderr)
         raise Exception(f"{stderr}")
     return
 
@@ -1497,7 +1510,7 @@ def write_to_log_file(file: Path, msg: str):
 
 def record_and_print(fullout: str, msg: str) -> str:
     fullout += msg
-    print(msg)
+    console.print(msg)
     return fullout
 
 def gen_modify_test_eval_cmd(bin_path, opt_level, mod_type, bytestring, result_path, must_follow, verbose_mod, verbose_eval, suppress_warn, tex_charts, delete_existing) -> str:
