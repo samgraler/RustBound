@@ -63,8 +63,8 @@ def gen_cross_build_cmd(
     target: RustcTarget,
     strip_cmd: Optional[RustcStripFlags] = None,
     opt_lvl: Optional[RustcOptimization] = None,
-    attack: Optional[CompileTimeAttacks] = None,
     force_podman: bool = False,
+    attack: str = "",
 ):
     '''
     Generate the build command for cross
@@ -82,10 +82,9 @@ def gen_cross_build_cmd(
             f" {CargoVariables.DEV_PROF_SET_OPT_LEVEL.value}={opt_lvl.value} "
         )
 
-    if attack is not None:
-        # TODO: In the future an attack could be a rustcflag,
-        # add these to the list
-        substrs.append(f" RUSTFLAGS='-C {attack.value}' ")
+    if attack != "":
+        # Add the attack string to the command
+        substrs.append(f" RUSTFLAGS='{attack}'")
 
     # Add the variable to force podman usage
     if force_podman:
@@ -104,6 +103,7 @@ def build_crate(
     strip: RustcStripFlags = RustcStripFlags.NOSTRIP,
     use_cargo=False,
     force_podman=False,
+    attack=""
 ) -> None:
     """Build the repo"""
 
@@ -112,9 +112,7 @@ def build_crate(
     if use_cargo:
         cmd = gen_cargo_build_cmd(crate_path, target, strip, opt_lvl)
     else:
-        cmd = gen_cross_build_cmd(
-            crate_path, target, strip, opt_lvl, force_podman=force_podman
-        )
+        cmd = gen_cross_build_cmd(crate_path, target, strip, opt_lvl, force_podman, attack)
 
     # If the crate doesn't exist dont run
     if not crate_path.exists():
