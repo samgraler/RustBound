@@ -1045,7 +1045,6 @@ def read_bounds_raw(
 
     START = 1 
     END = 2 
-
     for bin in alive_it(list(matching_files.keys())):
         # Init the confusion matrix for this bin
         start_conf = ConfusionMatrix(0,0,0,0)
@@ -1414,8 +1413,9 @@ def modify_test_evaluate(
             return
 
     mod_out_path = Path(f"~/ghPackages/BoundDetector/{opt_level}_nonstripped_{mod_type}_mod").expanduser().resolve()
+    
     raw_result_path = Path(f"{result_path}/{opt_level}/raw/{mod_type}").resolve()
-    dir_paths = [mod_out_path, raw_result_path]
+    dir_paths = [raw_result_path]
 
     for path in dir_paths:
         if path.exists():
@@ -1425,6 +1425,8 @@ def modify_test_evaluate(
             else:
                 # error_output += f"The following result directories/files are present:\n{path}\n"
                 continue
+        else:
+            path.mkdir(parents=True, exist_ok=True)
 
     eval_result_dir = Path(f"{result_path}/{opt_level}/results").resolve()
     eval_result_path = Path(f"{result_path}/{opt_level}/results/{mod_type}.txt").resolve()
@@ -1552,6 +1554,49 @@ def read_xda_npz(inp: Path)->np.ndarray:
     npz_file = np.load(inp)
     return npz_file[list(npz_file.keys())[0]]
 
+@app.command()
+def extract_metrics_from_directory(result_dir: Annotated[str, typer.Argument(help="Directory containing results of raw-test/read-bounds-raw")],):
+    '''
+    Extracts metrics from the results of raw-test/read-bounds-raw in a given directory.
+    '''
+    result_path = Path(result_dir)
+    import pdb; pdb.set_trace()
+    for opt_level in result_path.iterdir():
+        if opt_level.is_dir():
+            print(f"{opt_level.name}:")
+            results_dir = opt_level / 'results'
+            for result_file in results_dir.iterdir():
+                if result_file.is_file() and result_file.suffix == '.txt':
+                    with result_file.open('r', encoding='utf-8') as file:
+                        content = file.read()
+                        if content == '':
+                            continue
+                        data = json.loads(content)
+                        
+                        start_metrics = data.get('start', {}).get('metrics', {})
+                        end_metrics = data.get('end', {}).get('metrics', {})
+                        bound_metrics = data.get('bound', {}).get('metrics', {})
+                        runtime = data.get('runtime', None)
+
+                        print(f"  Model: {result_file.stem}")
+                        
+                        print("    Starts:")
+                        print(f"        Precision: {start_metrics.get('prec', 'N/A'):.3g}")
+                        print(f"        Recall: {start_metrics.get('recall', 'N/A'):.3g}")
+                        print(f"        F1-score: {start_metrics.get('f1', 'N/A'):.3g}")
+                        
+                        print("    Ends:")
+                        print(f"        Precision: {end_metrics.get('prec', 'N/A'):.3g}")
+                        print(f"        Recall: {end_metrics.get('recall', 'N/A'):.3g}")
+                        print(f"        F1-score: {end_metrics.get('f1', 'N/A'):.3g}")
+                        
+                        print("    Bounds:")
+                        print(f"        Precision: {bound_metrics.get('prec', 'N/A'):.3g}")
+                        print(f"        Recall: {bound_metrics.get('recall', 'N/A'):.3g}")
+                        print(f"        F1-score: {bound_metrics.get('f1', 'N/A'):.3g}")
+                        
+                        print(f"    Runtime: {runtime}")
+                        print("\n")
 
 #@app.command()
 #def test(
