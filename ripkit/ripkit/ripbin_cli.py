@@ -42,13 +42,14 @@ def build_helper(args):
     overwrite_existing = args[3]
     verbose = args[4]
     podman = args[5]
+    attack = args[6]
 
     strip = RustcStripFlags.NOSTRIP
     use_cargo = False
 
     # Build the crate
     try:
-        build_crate(crate, opt, target, strip, use_cargo=use_cargo, force_podman=podman)
+        build_crate(crate, opt, target, strip, use_cargo, podman, attack)
     except CrateBuildException as e:
         print(f"[bold red][FAILED][/bold red] Crate {crate} failed to build")
 
@@ -64,9 +65,7 @@ def build_helper(args):
             crate_path, target, strip, opt
         )
     else:
-        build_cmd = gen_cross_build_cmd(
-            crate_path, target, strip, opt, force_podman=podman
-        )
+        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt, podman, attack)
     # Get files of interest from the crate at the target <target>
     files_of_interest = [
         x for x in get_target_productions(crate, target) if is_executable(x)
@@ -109,6 +108,7 @@ def build_and_stash(
     crate,
     opt,
     target,
+    attack="",
     strip=RustcStripFlags.NOSTRIP,
     use_cargo=False,
     overwrite_existing=False,
@@ -118,7 +118,7 @@ def build_and_stash(
     """
 
     # Build the crate
-    build_crate(crate, opt, target, strip, use_cargo=use_cargo)
+    build_crate(crate, opt, target, strip, use_cargo, attack=attack)
 
     # Need this to get the build command
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
@@ -128,7 +128,7 @@ def build_and_stash(
     if use_cargo:
         build_cmd = gen_cargo_build_cmd(crate_path, target, strip, opt)
     else:
-        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt)
+        build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt, attack=attack)
 
     # Get files of interest from the crate at the target <target>
     files_of_interest = [
@@ -220,6 +220,16 @@ def init():
     ripbin_init()
     return
 
+@app.command()
+def print_compile_time_attacks():
+    """
+    Print a list of supported compile time attacks
+    """
+    print("Supported compile time attacks:")
+    for member in CompileTimeAttacks:
+        print(f"{member.name}: \"{member.value}\"")
+    print("")
+    return
 
 @app.command()
 def build_stash_all(
@@ -235,6 +245,10 @@ def build_stash_all(
     force_podman: Annotated[
         bool, typer.Option(help="Force the usage of podman for the Cross engine")
     ] = False,
+    compile_time_attack: Annotated[str, typer.Option(help="Compile time attack(s) to use. For multiple attack types, format as a space "
+                                                "separated list enclosed in double quotes Ex: \"attack_type1 attack_type2\" For a "
+                                                "list of available attacks, see the list-compile-time-attacks command. Currently, compile time "
+                                                "attacks through ripbin are only supported using the cross compilation project")] = "",
 ):
     """
     Build the crates in crates io and stash into ripbin db
@@ -247,6 +261,18 @@ def build_stash_all(
         print(e)
         return
 
+    # Parse compile time attacks given to generate attack string
+    attack_str = ""
+    if compile_time_attack != "":
+        for attack in compile_time_attack.split():
+            try:
+                string = CompileTimeAttacks[attack].value
+                attack_str += string
+                attack_str += " "
+            except KeyError:
+                print(f"Invalid attack type: {attack}")
+                return
+
     target_enum = get_enum_type(RustcTarget, target)
 
     # List of crate current installed that can be built
@@ -256,7 +282,7 @@ def build_stash_all(
 
     # If we don't have to build all the crates, find the crates that
     # are already built with the specified optimization and arch
-    # an dremovet that from the list of installed crates
+    # and remove that from the list of installed crates
     for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / "info.json"
         info = {}
@@ -285,7 +311,7 @@ def build_stash_all(
     args = []
     for crate in crates_to_build:
         args.append(
-            (crate, opt, target_enum, overwrite_existing, verbose, force_podman)
+            (crate, opt, target_enum, overwrite_existing, verbose, force_podman, attack_str)
         )
     print(f"Building {len(args)} crates!")
 
@@ -301,6 +327,10 @@ def seq_build_all_and_stash(
     stop_on_fail: Annotated[
         bool, typer.Option(help="Stop all compilation when one crate fails")
     ] = False,
+    compile_time_attack: Annotated[str, typer.Option(help="Compile time attack(s) to use. For multiple attack types, format as a space "
+                                                "separated list enclosed in double quotes Ex: \"attack_type1 attack_type2\" For a "
+                                                "list of available attacks, see the list-compile-time-attacks command. Currently, compile time "
+                                                "attacks through ripbin are only supported using the cross compilation project")] = "",
 ):
     """
     Sequentially build all the crates found in the local crates_io
@@ -311,6 +341,18 @@ def seq_build_all_and_stash(
     except Exception as e:
         print(e)
         return
+    
+    # Parse compile time attacks given to generate attack string
+    attack_str = ""
+    if compile_time_attack != "":
+        for attack in compile_time_attack.split():
+            try:
+                string = CompileTimeAttacks[attack].value
+                attack_str += string
+                attack_str += " "
+            except KeyError:
+                print(f"Invalid attack type: {attack}")
+                return
 
     target_enum = get_enum_type(RustcTarget, target)
 
@@ -321,7 +363,7 @@ def seq_build_all_and_stash(
 
     # If we don't have to build all the crates, find the crates that
     # are already built with the specified optimization and arch
-    # an dremovet that from the list of installed crates
+    # and remove that from the list of installed crates
     for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
         info_file = parent / "info.json"
         info = {}
@@ -352,7 +394,7 @@ def seq_build_all_and_stash(
     for crate in crates_to_build:
         res = 0
         try:
-            res = build_and_stash(crate, opt, target_enum, use_cargo=False)
+            res = build_and_stash(crate, opt, target_enum, attack_str)
         except CrateBuildException as e:
             print(f"[bold red]Failed to build crate {crate}:: {e}[/bold red]")
             continue
