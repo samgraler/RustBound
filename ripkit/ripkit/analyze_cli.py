@@ -793,6 +793,37 @@ def get_function(
     print(f"HEX REPR:\n {hex_repr}")
     return
 
+@app.command()
+def get_function_counts(
+    dataset: Annotated[Path, typer.Argument(help="The dataset")],
+    ):
+    """
+    Count functions per binary in the dataset
+    Pass just a single optimization level for now 
+    """
+
+    #TODO: Function to iterate all opt levels and compare... this is more 
+    # manaul rn 
+
+    func_counts = {}
+
+    for bin in alive_it(list(dataset.glob('*'))):
+        funcs = len(get_functions(bin))
+
+        if funcs not in func_counts.keys():
+            func_counts[funcs] = []
+        func_counts[funcs].append(bin.resolve())
+
+    single_occurance = 0
+    for k, _ in func_counts.items():
+        print(f"{len(func_counts[k])} files had {k} functions")
+        if len(func_counts[k]) == 1:
+            single_occurance+=1
+
+    print(f"Had {single_occurance} unique function counts")
+
+    return
+
 
 if __name__ == "__main__":
     app()

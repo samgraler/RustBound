@@ -10,20 +10,20 @@ class CompileTimeAttacks(Enum):
     # Codegen Options
 
     frame_pointers = "-C force-frame-pointers"
-    inline_threshold = "-C inline-threshold=0" # No Inline (higher threshold means more inlining)
+    #inline_threshold = "-C inline-threshold=0" # No Inline (higher threshold means more inlining)
     no_redzone = "-C no-redzone"
-    pic_reloc_model = "-C relocation-model=pic" # Position Independent Code
-    pie_reloc_model = "-C relocation-model=pie" # Position Independent Executable
-    ropi_rwpi_reloc_model = "-C relocation-model=ropi-rwpi" # Combined Read-Only and Read-Write Position Independence
+    #pic_reloc_model = "-C relocation-model=pic" # Position Independent Code
+    #pie_reloc_model = "-C relocation-model=pie" # Position Independent Executable
+    #ropi_rwpi_reloc_model = "-C relocation-model=ropi-rwpi" # Combined Read-Only and Read-Write Position Independence
 
     # LLVM Options
 
-    disable_tail_calls = "-C llvm-args=--disable-tail-calls"
+    #disable_tail_calls = "-C llvm-args=--disable-tail-calls"
     frame_pointer_none = "-C llvm-args=--frame-pointer=none" # codegen option above takes care of all frame-pointer option
-    function_sections = "-C llvm-args=--function-sections"
+    #function_sections = "-C llvm-args=--function-sections"
     stackrealign = "-C llvm-args=--stackrealign"
-    tailcallopt = "-C llvm-args=--tailcallopt"
-    x86_align_branch = "-C llvm-args=--x86-align-branch=jcc+fused+jmp+call+ret+indirect" # Includes all available branch options
+    #tailcallopt = "-C llvm-args=--tailcallopt"
+    #x86_align_branch = "-C llvm-args=--x86-align-branch=jcc+fused+jmp+call+ret+indirect" # Includes all available branch options
     x86_pad_max_prefix_size_0 = "-C llvm-args=--x86-pad-max-prefix-size=0" # No padding
     x86_pad_max_prefix_size_8 = "-C llvm-args=--x86-pad-max-prefix-size=8" # Some padding (most likely close to default)
     x86_pad_max_prefix_size_16 = "-C llvm-args=--x86-pad-max-prefix-size=16" # Lots of padded (may allow more than default)
