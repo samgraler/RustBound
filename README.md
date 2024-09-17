@@ -1,5 +1,7 @@
 # RustBound !! 
 
+**The dataset and code are for research purpose only** 
+
 Analysis of current methods of Function Boundary Detection in Stripped Binary Files on executable files generated from Rust source code
 
 The main components of this repository are:
@@ -69,4 +71,5 @@ python ripkit/main ghidra
 ```
 ## Contacts
 Ryan Evans evans2ra@mail.uc.edu
+
 Boyang Wang boyang.wang@uc.edu
