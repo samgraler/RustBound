@@ -20,9 +20,11 @@ The main components of this repository are:
 See the README.md file in the `ripkit` directory for ripkit installation and setup. 
 
 # Dataset 
+Our datasets used in this study can be accessed through the link below (**last modified: Sept. 2024**):
 
 https://mailuc-my.sharepoint.com/:f:/g/personal/wang2ba_ucmail_uc_edu/EvqFCk8YX1dIkY_wrJG_L5kBlq9DrMhkbfSo_AfZST6oGw?e=UAS3hK
 
+Note: the above link need to be updated every 6 months due to certain settings of OneDrive. If you find the links are expired and you cannot access the data, please feel free to email us (boyang.wang@uc.edu). We will be update the links as soon as we can (typically within 1~2 days). Thanks!
 
 # Training BiRNN...
 
