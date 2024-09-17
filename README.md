@@ -19,6 +19,10 @@ The main components of this repository are:
 
 See the README.md file in the `ripkit` directory for ripkit installation and setup. 
 
+# Dataset 
+
+https://mailuc-my.sharepoint.com/:f:/g/personal/wang2ba_ucmail_uc_edu/EvqFCk8YX1dIkY_wrJG_L5kBlq9DrMhkbfSo_AfZST6oGw?e=UAS3hK
+
 
 # Training BiRNN...
 
