@@ -10,7 +10,7 @@ The main components of this repository are:
 ## Reference
 When reporting results that use the dataset or code in this repository, please cite the paper below:
 
-Mabon Ninan, Evan Nimmo, Shane Reilly, Channing Smith, Wenhai Sun, Boyang Wang, and John M. Emmert, "A Second Look at the Portability of Deep Learning Side-Channel Attacks over EM Traces," The 27th International Symposium on Research in Attacks, Intrusions and Defenses (**RAID 2024**), Padua, Italy, Sept. 30 -- Oct. 2, 2024
+Ryan Evans, William Hawkins, and Boyang Wang "RustBound: Function Boundary Detection over Rust Stripped Binaries," The 2nd EAI International Conference on Security and Privacy in Cyber-Physical Systems and Smart Vehicles (**SmartSP 2024**), New Orleans, LA, USA, Nov. 7 - Nov. 8, 2024.
 
 ## Ripkit... 
 
@@ -67,4 +67,6 @@ Similarly ghidra is supported as well:
 ```bash
 python ripkit/main ghidra
 ```
-
+## Contacts
+Ryan Evans evans2ra@mail.uc.edu
+Boyang Wang boyang.wang@uc.edu
