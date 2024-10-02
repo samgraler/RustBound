@@ -9,17 +9,18 @@ class CallBackException(Exception):
 
 
 def opt_lvl_callback(opt_lvl):
-    if opt_lvl == "O0":
+    opt_lvl = opt_lvl.lower()
+    if opt_lvl in ["o0", "0"]:
         opt = RustcOptimization.O0
-    elif opt_lvl == "O1":
+    elif opt_lvl in ["o1", "1"]:
         opt = RustcOptimization.O1
-    elif opt_lvl == "O2":
+    elif opt_lvl in ["o2", "3"]:
         opt = RustcOptimization.O2
-    elif opt_lvl == "O3":
+    elif opt_lvl in ["o3", "3"]:
         opt = RustcOptimization.O3
-    elif opt_lvl == "Oz":
+    elif opt_lvl in ["oz", "z"]:
         opt = RustcOptimization.OZ
-    elif opt_lvl == "Os":
+    elif opt_lvl in ["os", "s"]:
         opt = RustcOptimization.OS
     else:
         raise CallBackException("{} is an invalid optimization lvl".format(opt_lvl))
