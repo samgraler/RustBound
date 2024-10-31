@@ -25,6 +25,7 @@ mkdocs = "^1.6.0"
 mkdocs-material = "^9.5.25"
 mkdocstrings = "^0.25.1"
 mkdocstrings-python = "^1.10.3"
+typing-extensions = "^4.12.2"
 
 
 [tool.poetry.group.dev.dependencies]

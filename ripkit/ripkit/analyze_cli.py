@@ -8,6 +8,8 @@ from rich.console import Console
 import typer
 import math
 
+import sys
+sys.path.append('../ripkit')
 
 from ripkit.ripbin import (
     get_functions,

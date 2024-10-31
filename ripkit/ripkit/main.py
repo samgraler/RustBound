@@ -29,17 +29,11 @@ from typing_extensions import Annotated
 
 from ripkit.cargo_picky import (CrateBuildException, RustcStripFlags,
                                 RustcTarget, build_crate)
+
 from ripkit.ripbin import (AnalysisType, RustFileBundle, calculate_md5,
                            disasm_at, generate_minimal_labeled_features,
                            get_functions, iterable_path_shallow_callback,
                            save_analysis)
-
-
-class tmp:
-    def main(self):
-        """main func!"""
-        return
-
 
 console = Console()
 app = typer.Typer(pretty_exceptions_show_locals=False)
