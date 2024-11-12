@@ -9,18 +9,18 @@ from multiprocessing import Pool
 from pathlib import Path
 from typing import Any, List, Tuple
 
-import analyze_cli
-import cargo_picky.db_cli as cargo_db_cli
-import evil_mod
-import ghidra.cli as ghidra_cli
-import ida.cli as ida_cli
+from . import analyze_cli
+from .cargo_picky import db_cli as cargo_db_cli
+from . import evil_mod
+from .ghidra import cli as ghidra_cli
+from .ida import cli as ida_cli
 import lief
 import numpy as np
-import ripbin_cli
+from . import ripbin_cli
 import typer
 from alive_progress import alive_bar, alive_it
 from art import text2art
-from cli_utils import get_enum_type, opt_lvl_callback
+from .cli_utils import get_enum_type, opt_lvl_callback
 from rich import print
 from rich.console import Console
 from rich.progress import track

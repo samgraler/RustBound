@@ -13,7 +13,7 @@ from typing import List
 import lief
 import typer
 from alive_progress import alive_bar, alive_it
-from cli_utils import get_enum_type, opt_lvl_callback
+from .cli_utils import get_enum_type, opt_lvl_callback
 from rich import print
 from rich.console import Console
 from rich.progress import track
@@ -52,8 +52,9 @@ def build_helper(args):
         build_crate(crate, opt, target, strip, use_cargo, podman, attack)
     except CrateBuildException as e:
         print(f"[bold red][FAILED][/bold red] Crate {crate} failed to build")
+        return
 
-    print(f"[bold green][BUILT][/bold green] Crate {crate} built")
+    print(f"[bold yellow][BUILT][/bold green] Crate {crate} built")
 
     # Need this to get the build command
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
@@ -66,6 +67,7 @@ def build_helper(args):
         )
     else:
         build_cmd = gen_cross_build_cmd(crate_path, target, strip, opt, podman, attack)
+
     # Get files of interest from the crate at the target <target>
     files_of_interest = [
         x for x in get_target_productions(crate, target) if is_executable(x)
@@ -81,7 +83,6 @@ def build_helper(args):
             )
         return 99
 
-    print(f"[bold green][SUCCESS][/bold green]Crate {crate}")
 
     # The only file in the list should be the binary
     binary = files_of_interest[0]
@@ -99,6 +100,7 @@ def build_helper(args):
     try:
         # Save analysis
         stash_bin(binary, info, overwrite_existing=overwrite_existing)
+        print(f"[bold green][SUCCESS][/bold green]Crate {crate} has been stashed")
     except Exception as e:
         print(f"Exception {e} in crate {crate}")
     return

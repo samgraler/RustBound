@@ -6,7 +6,7 @@ authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.10,<=3.11"
+python = ">=3.10,<=3.12"
 typer = "0.9.4"
 rich = "13.7.1"
 numpy = "1.26.4"
@@ -34,3 +34,8 @@ black = "^24.4.2"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.scripts]
+# Define your custom command here
+ripkit = "ripkit.main:app"

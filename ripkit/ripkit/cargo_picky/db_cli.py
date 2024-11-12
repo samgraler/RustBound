@@ -130,7 +130,8 @@ def clone_many_exe(
         x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
     ]
 
-    if not try_nonexe:
+    if not try_nonexe and nonexe_names.exists():
+        #TODO: This needs better handling
         nonexe_files = [x for x in open(nonexe_names).readlines()]
     else:
         nonexe_files = []

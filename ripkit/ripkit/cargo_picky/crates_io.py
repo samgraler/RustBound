@@ -124,7 +124,9 @@ def crates_io_df() -> pd.DataFrame:
     """
     # At this point EXTRACTED_TAR_DIR exists
     if not CRATES_IO_REG.exists():
-        print(f"Error, the file {CRATES_IO_REG} should exist but doesn't")
+        msg = f"Error, the file {CRATES_IO_REG} should exist but doesn't"
+        raise Exception(msg)
+
 
     # Get a dataframe of the crates
     df = pd.read_csv(CRATES_IO_REG.resolve())
