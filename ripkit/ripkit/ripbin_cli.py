@@ -13,7 +13,7 @@ from typing import List
 import lief
 import typer
 from alive_progress import alive_bar, alive_it
-from .cli_utils import get_enum_type, opt_lvl_callback
+from cli_utils import get_enum_type, opt_lvl_callback
 from rich import print
 from rich.console import Console
 from rich.progress import track
@@ -54,7 +54,7 @@ def build_helper(args):
         print(f"[bold red][FAILED][/bold red] Crate {crate} failed to build")
         return
 
-    print(f"[bold yellow][BUILT][/bold green] Crate {crate} built")
+    print(f"[bold yellow][BUILT][/bold yellow] Crate {crate} built")
 
     # Need this to get the build command
     crate_path = Path(LocalCratesIO.CRATES_DIR.value).resolve().joinpath(crate)
@@ -236,7 +236,7 @@ def print_compile_time_attacks():
 @app.command()
 def build_stash_all(
     opt_lvl: Annotated[
-        str, typer.Argument(help="The optimization level to compile for")
+        List[str], typer.Argument(help="The optimization level to compile for")
     ],
     target: Annotated[str, typer.Argument(help="crate target")],
     num_workers: Annotated[int, typer.Option(help="number of workers")] = CPU_COUNT_75,
@@ -246,7 +246,7 @@ def build_stash_all(
     verbose: Annotated[bool, typer.Option(help="Print verbose info")] = False,
     force_podman: Annotated[
         bool, typer.Option(help="Force the usage of podman for the Cross engine")
-    ] = False,
+    ] = True,
     compile_time_attack: Annotated[str, typer.Option(help="Compile time attack(s) to use. For multiple attack types, format as a space "
                                                 "separated list enclosed in double quotes Ex: \"attack_type1 attack_type2\" For a "
                                                 "list of available attacks, see the list-compile-time-attacks command. Currently, compile time "
@@ -256,69 +256,72 @@ def build_stash_all(
     Build the crates in crates io and stash into ripbin db
     """
 
-    # Opt lvl call back
-    try:
-        opt = opt_lvl_callback(opt_lvl)
-    except Exception as e:
-        print(e)
-        return
 
-    # Parse compile time attacks given to generate attack string
-    attack_str = ""
-    if compile_time_attack != "":
-        for attack in compile_time_attack.split():
-            try:
-                string = CompileTimeAttacks[attack].value
-                attack_str += string
-                attack_str += " "
-            except KeyError:
-                print(f"Invalid attack type: {attack}")
-                return
-
-    target_enum = get_enum_type(RustcTarget, target)
-
-    # List of crate current installed that can be built
-    crates_to_build = [
-        x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
-    ]
-
-    # If we don't have to build all the crates, find the crates that
-    # are already built with the specified optimization and arch
-    # and remove that from the list of installed crates
-    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
-        info_file = parent / "info.json"
-        info = {}
+    for single_opt_lvl in opt_lvl:
+        # Opt lvl call back
         try:
-            with open(info_file, "r") as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
+            opt = opt_lvl_callback(single_opt_lvl)
         except Exception as e:
-            print(f"An error occurred: {e}")
-            continue
+            print(e)
+            return
 
-        if (
-            info["optimization"].upper() in opt_lvl
-            and info["target"].upper() in target_enum.value.upper()
-        ):
-            # Remove this file from the installed crates list
-            if (x := info["binary_name"]) in crates_to_build:
-                crates_to_build.remove(x)
+        # Parse compile time attacks given to generate attack string
+        attack_str = ""
+        if compile_time_attack != "":
+            for attack in compile_time_attack.split():
+                try:
+                    string = CompileTimeAttacks[attack].value
+                    attack_str += string
+                    attack_str += " "
+                except KeyError:
+                    print(f"Invalid attack type: {attack}")
+                    return
 
-    # Build and analyze each crate
-    args = []
-    for crate in crates_to_build:
-        args.append(
-            (crate, opt, target_enum, overwrite_existing, verbose, force_podman, attack_str)
-        )
-    print(f"Building {len(args)} crates!")
+        target_enum = get_enum_type(RustcTarget, target)
 
-    with Pool(processes=num_workers) as pool:
-        results = pool.map(build_helper, args)
+        # List of crate current installed that can be built
+        crates_to_build = [
+            x.name for x in Path(LocalCratesIO.CRATES_DIR.value).iterdir() if x.is_dir()
+        ]
+
+        # If we don't have to build all the crates, find the crates that
+        # are already built with the specified optimization and arch
+        # and remove that from the list of installed crates
+        for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
+            info_file = parent / "info.json"
+            info = {}
+            try:
+                with open(info_file, "r") as f:
+                    info = json.load(f)
+            except FileNotFoundError:
+                print(f"File not found: {info_file}")
+                continue
+            except json.JSONDecodeError as e:
+                print(f"JSON decoding error: {e}")
+                continue
+            except Exception as e:
+                print(f"An error occurred: {e}")
+                continue
+
+            if (
+                info["optimization"].upper() in opt_lvl
+                and info["target"].upper() in target_enum.value.upper()
+            ):
+                # Remove this file from the installed crates list
+                if (x := info["binary_name"]) in crates_to_build:
+                    crates_to_build.remove(x)
+
+        # Build and analyze each crate
+        args = []
+        for crate in crates_to_build:
+            args.append(
+                (crate, opt, target_enum, overwrite_existing, verbose, force_podman, attack_str)
+            )
+        print(f"Building {len(args)} crates!")
+
+        with Pool(processes=num_workers) as pool:
+            results = pool.map(build_helper, args)
+
     return
 
 

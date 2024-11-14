@@ -189,6 +189,27 @@ def clear_cloned():
     return
 
 
+@app.command()
+def make_room():
+    """
+    Make room on system ! :) 
+
+    Specifically, in each crates package, after building the "target" directory 
+    may start to get quite large. Remove the contents of this directory 
+    for each package
+    """
+
+    crates = list(Path(LocalCratesIO.CRATES_DIR.value).glob("*"))
+    to_remove = []
+    for crate in alive_it(crates):
+        if (target_dir:=crate.joinpath("target")).is_dir(): 
+            to_remove.append(target_dir)
+
+    print(f"Removing {len(to_remove)} build artifacts")
+    for target_dir in alive_it(to_remove):
+        shutil.rmtree(target_dir)
+
+
 if __name__ == "__main__":
     banner = text2art("Ripkit-DB", "random")
     console.print(banner, highlight=False)
