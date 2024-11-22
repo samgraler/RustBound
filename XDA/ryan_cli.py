@@ -16,10 +16,19 @@ from dataclasses import dataclass, asdict
 from colorama import Fore, Back, Style
 import numpy as np
 from alive_progress import alive_it
+
+
+import sys
+
+sys.path.append("../ripkit/")
+
 from ripkit.ripbin import ( 
     ConfusionMatrix,
     calc_metrics,
     lief_gnd_truth,
+)
+from ripkit import (
+    load_bins,
 )
 import time
 import typer 
@@ -392,10 +401,63 @@ def unified_gen_training(
 
     return
 
+
+#TODO: Force generationg of gen finetune and gen pretrain at the same tiem 
+#      So that we don't acciendatally overlap binary selection
+@app.command()
+def gen_finetune_data(
+    bin_dir: Annotated[Path, typer.Argument()],
+    num_train_bins: Annotated[int, typer.Argument()],
+    cache_dataset: Annotated[Path, typer.Argument()]=None,
+    ):
+    """
+    Preprocess data for finetuning 
+    """
+
+    bins_path = Path(bin_dir)
+    if not bins_path.exists():
+        print(f"Bin path {bins_path} does not exist")
+        return
+
+    # Get the bins... 
+    # Need to load the dataset and each bins info for thi
+    #bins_list = list(bins_path.rglob('*'))
+
+    bin_bundles = load_bins(bin_dir)
+
+    # Chop down the list 
+    sampled_bundles = random.sample(bin_bundles, num_train_bins)
+
+    # Get a list of just the binaries to pass to the generator
+    bins = [x.bin for x in sampled_bundles]
+
+    print(f"Caching the datasets at {cache_dataset.absolute()}")
+    if cache_dataset is not None:
+        if cache_dataset.is_file():
+            print(f"the cache dataset path exists but it is a file")
+            return 
+        elif not cache_dataset.exists(): 
+            cache_dataset.mkdir()
+
+        train_out = cache_dataset.joinpath("train")
+        train_out.mkdir()
+
+        # Save the bundles
+        for bundle in sampled_bundles:
+            # Copy the binary and the bundle
+            shutil.copytree(bundle.bin.parent, train_out.joinpath(f"{bundle.bin.parent.name}"))
+
+
+    generate_data_src_finetune_for_funcbound(bins)
+    return 
+
+
 @app.command()
 def gen_pretrain_data(
-        bin_dir: Annotated[str, typer.Argument()],
+        bin_dir: Annotated[Path, typer.Argument()],
+        num_train_bins: Annotated[int, typer.Argument()],
         num_validation_bins: Annotated[int, typer.Argument()],
+        cache_dataset: Annotated[Path, typer.Argument()]=None,
     ):
 
     bins_path = Path(bin_dir)
@@ -403,13 +465,49 @@ def gen_pretrain_data(
         print(f"Bin path {bins_path} does not exist")
         return
 
-    bins_list = list(bins_path.rglob('*'))
+    # Get the bins... 
+    # Need to load the dataset and each bins info for thi
+    #bins_list = list(bins_path.rglob('*'))
+
+    bins_list = load_bins(bin_dir)
+
+    # Chop down the list 
+    bins_list = random.sample(bins_list, num_train_bins+num_validation_bins)
 
     # Get random valudation bins, default to 4 of them 
-    valid = random.sample(bins_list, num_validation_bins)
-    bins_path = [x for x in bins_list if x not in valid]
+    valid_bundle = random.sample(bins_list, num_validation_bins)
+    train_bundle = [x for x in bins_list if x not in valid_bundle]
 
-    generate_data_src_pretrain_all(bins_list, valid)
+    # Get a list of just the binaries to pass to the generator
+    valid_bins = [x.bin for x in valid_bundle]
+    train_bins = [x.bin for x in train_bundle]
+
+    print(f"Caching the datasets at {cache_dataset.absolute()}")
+    if cache_dataset is not None:
+        if cache_dataset.is_file():
+            print(f"the cache dataset path exists but it is a file")
+            return 
+        elif not cache_dataset.exists(): 
+            cache_dataset.mkdir()
+
+        train_out = cache_dataset.joinpath("train")
+        train_out.mkdir()
+        valid_out = cache_dataset.joinpath("valid")
+        valid_out.mkdir()
+
+        # Save the bundles
+        for bundle in train_bundle:
+            # Copy the binary and the bundle
+            shutil.copytree(bundle.bin.parent, train_out.joinpath(f"{bundle.bin.parent.name}"))
+
+        # Save the bundles
+        for bundle in valid_bundle:
+            # Copy the binary and the bundle
+            shutil.copytree(bundle.bin.parent, valid_out.joinpath(f"{bundle.bin.parent.name}"))
+
+
+
+    generate_data_src_pretrain_all(train_bins, valid_bins)
 
     return
 
