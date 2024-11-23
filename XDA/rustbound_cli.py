@@ -401,6 +401,52 @@ def unified_gen_training(
 
     return
 
+@app.command()
+def cherry_pick_test(
+    train_cache: Annotated[Path, typer.Argument()],
+    finetune_cache: Annotated[Path, typer.Argument()],
+    whole_dataset: Annotated[Path, typer.Argument()],
+    output: Annotated[Path, typer.Argument()],
+    ):
+    """
+    Cherry pick binaries from the whole dataset that are not in the 
+    train or finetune cache
+    """
+
+    # Accumulate the train list 
+    train_list = [x.name for x in train_cache.joinpath("train").glob('*')]
+    train_list.extend([x.name for x in train_cache.joinpath("valid").glob('*')])
+
+    # Accumulate the finetuning list 
+    train_list.extend([x.name for x in finetune_cache.joinpath("train").glob('*')])
+
+
+
+    # Accumulate the whole datset 
+    # TODO: Expecting the dataset to be in strucute of:
+    #  <hash>_<bin_name>_|opt|
+    #   | info.json
+    #   | <bin_name>
+    test_set:list[Path] = []
+
+    duplicate = 0
+
+    # Pop the used data from the dataset
+    for path in whole_dataset.glob('*'):
+        if path.name not in train_list:
+            test_set.append(path)
+        else:
+            duplicate +=1
+
+    print(f"Found {duplicate} files in the  train and finetune in the whole")
+    output.mkdir(exist_ok=True)
+
+    for path in track(test_set, description=f"Saving test dataset to {output}"):
+        shutil.copytree(path.absolute(), output.joinpath(path.name))
+
+    return 
+
+
 
 #TODO: Force generationg of gen finetune and gen pretrain at the same tiem 
 #      So that we don't acciendatally overlap binary selection
@@ -993,31 +1039,36 @@ def safe_nump_save(data: np.ndarray, npz_file: Path):
 
 @app.command()
 def raw_test(
-    bins: Annotated[str, typer.Argument()],
-    checkpoint_dir: Annotated[str, typer.Argument()],
+    bins: Annotated[Path, typer.Argument()],
+    checkpoint_dir: Annotated[Path, typer.Argument()],
     checkpoint: Annotated[str, typer.Argument()],
-    result_path: Annotated[str, typer.Argument()],
+    result_path: Annotated[Path, typer.Argument()],
     check_for_existing_results: Annotated[bool, typer.Option()]=True,
+    bins_are_bundles: Annotated[bool, typer.Option(help="If the directory is not _only_ bins, and has sub dirs with info.json files, set this to true to load only the bins")]=False,
     ):
     '''
     Temp test to see how to save raw predictions in pbnz file
     '''
 
 
-    res_path = Path(result_path)
-    if not res_path.exists():
-        res_path.mkdir()
-    elif res_path.is_file():
+    if not result_path.exists():
+        result_path.mkdir()
+    elif result_path.is_file():
         raise Exception
 
-    input_path = Path(bins)
-    if not input_path.exists():
-        print(f"Path {input_path} doesn't exist")
+    if not bins.exists():
+        print(f"Path {bins} doesn't exist")
         return
-    elif input_path.is_dir():
-        inp_bins =  list(input_path.rglob('*'))
+    elif bins.is_dir():
+        if bins_are_bundles:
+            inp_bins = [x.bin for x in load_bins(bins)]
+        else:
+            inp_bins =  list(bins.rglob('*'))
     else:
-        inp_bins = [input_path]
+        if bins_are_bundles:
+            inp_bins = [x.bin for x in load_bins(bins)]
+        else:
+            inp_bins = [bins]
 
     # Load our model
     roberta = RobertaModel.from_pretrained(checkpoint_dir, 
@@ -1030,15 +1081,15 @@ def raw_test(
     for bin_path in alive_it(inp_bins):
         print(f"On bin: {bin_path.name}")
 
-        single_res_path = res_path.joinpath(f"{bin_path.name}")
-        if single_res_path.exists() and check_for_existing_results:
-            if all( x in [z.name for z in single_res_path.rglob('*')] for x in ["runtime.txt", f"{bin_path.name}_result.npz"]):
+        single_result_path = result_path.joinpath(f"{bin_path.name}")
+        if single_result_path.exists() and check_for_existing_results:
+            if all( x in [z.name for z in single_result_path.rglob('*')] for x in ["runtime.txt", f"{bin_path.name}_result.npz"]):
                 print(f"Skipping {bin_path.name}... already done")
                 continue
             else:
-                #single_res_path.unlink()
-                shutil.rmtree(single_res_path)
-        elif single_res_path.exists():
+                #single_result_path.unlink()
+                shutil.rmtree(single_result_path)
+        elif single_result_path.exists():
             raise Exception("result file already exists, pass arguments to chose to delete the existing path or skip over this experiemtn")
 
         # Get the xda res  and save
@@ -1047,14 +1098,14 @@ def raw_test(
 
 
         # Check that the dir exists, and is not a file 
-        if single_res_path.exists():
-            if single_res_path.is_file():
+        if single_result_path.exists():
+            if single_result_path.is_file():
                 raise Exception
-        elif not single_res_path.exists():
-            single_res_path.mkdir()
+        elif not single_result_path.exists():
+            single_result_path.mkdir()
 
         # Make the sub directory
-        sub_dir = single_res_path.joinpath(bin_path.name)
+        sub_dir = single_result_path.joinpath(bin_path.name)
         if not sub_dir.exists():
             sub_dir.mkdir()
         elif sub_dir.is_file():
@@ -1097,6 +1148,7 @@ def read_bounds_raw(
     supress_warn: Annotated[bool, typer.Option()] = False,
     out_dir: Annotated[str, typer.Option()] = "",
     tex_charts: Annotated[Path, typer.Option()] = Path(""),
+    bins_are_bundles: Annotated[bool, typer.Option(help="If the directory is not _only_ bins, and has sub dirs with info.json files, set this to true to load only the bins")]=False,
     ):
     '''
     Read the input dir and compute results using the lief module
@@ -1112,9 +1164,15 @@ def read_bounds_raw(
         return
 
     if bin_path.is_file():
-        bins = [bin_path]
+        if bins_are_bundles:
+            bins = [x.bin for x in load_bins(bin_path)]
+        else:
+            bins = [bin_path]
     else:
-        bins = list(bin_path.glob('*'))
+        if bins_are_bundles:
+            bins = [x.bin for x in load_bins(bin_path)]
+        else:
+            bins = list(bin_path.glob('*'))
 
     matching_files = {}
     for bin in bins:
@@ -1419,15 +1477,16 @@ def read_bounds_raw(
 
 @app.command()
 def  test_and_evaluate(
-    bin_path: Annotated[str, typer.Argument(help="Path to the directory or file containing binary files for inference.")],
-    checkpoint_dir: Annotated[str, typer.Argument(help="Directory containing the model checkpoint files.")],
+    bin_path: Annotated[Path, typer.Argument(help="Path to the directory or file containing binary files for inference.")],
+    checkpoint_dir: Annotated[Path, typer.Argument(help="Directory containing the model checkpoint files.")],
     checkpoint: Annotated[str, typer.Argument(help="Specific checkpoint file to be used for loading the model.")],
-    raw_result_path: Annotated[str, typer.Argument(help="Directory where raw prediction results will be saved.")],
-    eval_result_path: Annotated[str, typer.Argument(help="Directory where evaluation is to be saved in JSON format. Default is empty, meaning no output will be saved.")],
+    raw_result_path: Annotated[Path, typer.Argument(help="Directory where raw prediction results will be saved.")],
+    eval_result_path: Annotated[Path, typer.Argument(help="Directory where evaluation is to be saved in JSON format. Default is empty, meaning no output will be saved.")],
     check_for_existing_results: Annotated[bool, typer.Option(help="Flag to check for existing results during prediction and skip computation if found. Default is True.")] = True,
     verbose: Annotated[bool, typer.Option(help="Flag to enable verbose output during evaluation. Default is False.")] = False,
     suppress_warn: Annotated[bool, typer.Option(help="Flag to suppress warnings during evaluation. Default is False.")] = False,
     tex_charts: Annotated[str, typer.Option(help="Optional path to save evaluation metrics in LaTeX format. Default is empty, meaning no LaTeX output will be saved.")] = "",
+    bins_are_bundles: Annotated[bool, typer.Option(help="If the directory is not _only_ bins, and has sub dirs with info.json files, set this to true to load only the bins")]=False,
 ) -> str:
     """
     Function to perform inference on a given dataset and evaluate the results, making use of raw-test and read-bounds-raw
@@ -1438,13 +1497,14 @@ def  test_and_evaluate(
     out_chunk += "-" * console.width + "\n"
     out_chunk += "-" * console.width + "\n"
 
+
     # Step 1: Run raw_test to perform inference and save raw predictions
     cmd = gen_raw_test_cmd(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results)
     out_chunk += f"Raw Test:\n"
     out_chunk += "-" * console.width + "\n"
     out_chunk += f"Command executed (equivalent): [bold cyan]{cmd}[/bold cyan]\n"
     full_output = record_and_print(full_output, out_chunk)
-    raw_test(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results)
+    raw_test(bin_path, checkpoint_dir, checkpoint, raw_result_path, check_for_existing_results, bins_are_bundles)
 
     # Step 2: Run read_bounds_raw to read and evaluate the raw predictions
     cmd = gen_read_bounds_raw_cmd(raw_result_path, bin_path, verbose, suppress_warn, eval_result_path, tex_charts)
@@ -1454,7 +1514,11 @@ def  test_and_evaluate(
     out_chunk += f"Command executed (equivalent): [bold cyan]{cmd}[/bold cyan]\n"
     out_chunk += "-" * console.width + "\n"
     full_output = record_and_print(full_output, out_chunk)
-    read_bounds_raw(Path(raw_result_path), Path(bin_path), verbose, suppress_warn, eval_result_path, Path(tex_charts))
+    if bins_are_bundles:
+        bins = load_bins(bin_path)
+    else:
+        bins = bin_path
+    read_bounds_raw(Path(raw_result_path), bins, verbose, suppress_warn, eval_result_path, Path(tex_charts))
 
     return full_output
 
