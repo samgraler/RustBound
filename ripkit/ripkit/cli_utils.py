@@ -27,7 +27,7 @@ def opt_lvl_callback(opt_lvl):
     return opt
 
 
-def get_enum_type(enum, input_string) -> Enum:
+def get_enum_type(enum, input_string):
     try:
         return enum(input_string)
     except Exception:

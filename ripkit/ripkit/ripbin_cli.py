@@ -13,7 +13,8 @@ from typing import List
 import lief
 import typer
 from alive_progress import alive_bar, alive_it
-from cli_utils import get_enum_type, opt_lvl_callback
+#from .cli_utils import get_enum_type, opt_lvl_callback
+from .cli_utils import get_enum_type, opt_lvl_callback
 from rich import print
 from rich.console import Console
 from rich.progress import track
@@ -170,33 +171,119 @@ def build_and_stash(
 
     return
 
+def load_info(inp: Path)-> dict:
+    """
+    Load the bundle information 
+    """
+    try:
+        with open(inp, "r") as f:
+            info = json.load(f)
+    except FileNotFoundError:
+        print(f"File not found: {inp}")
+        info = {}
+    except json.JSONDecodeError as e:
+        print(f"JSON decoding error: {e}")
+        info = {} 
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        info = {}
+
+    return info
+
+
+    
+@dataclass
+class BinInfoBundle:
+    bin: Path
+    info: Path
+
+
+
+def load_bins(
+    bin_path: Path,
+) -> List[BinInfoBundle]:
+    """
+    Get the binaries from an exported dataset of 
+
+    dataset
+    |
+    | - binary_hash_name
+    | | - bin
+    | | - info.json
+    """
+
+    bins = []
+    #TODO Check for hases
+    hashes = []
+
+    for parent in bin_path.expanduser().resolve().iterdir():
+        info_file = parent / "info.json"
+        info = load_info(info_file)
+        if info == {}: 
+            continue
+
+        #try:
+        #    with open(info_file, "r") as f:
+        #        info = json.load(f)
+        #except FileNotFoundError:
+        #    print(f"File not found: {info_file}")
+        #    continue
+        #except json.JSONDecodeError as e:
+        #    print(f"JSON decoding error: {e}")
+        #    continue
+        #except Exception as e:
+        #    print(f"An error occurred: {e}")
+        #    continue
+
+        if info['binary_hash'] in hashes:
+            continue
+
+        hashes.append(info['binary_hash'])
+        bins.append(BinInfoBundle(parent.joinpath(info["binary_name"]).absolute(), info_file.absolute()))
+
+    return bins
+
+
+
 
 def get_bins(
     target: RustcTarget,
     optimization: RustcOptimization,
-) -> List[Path]:
+    bin_path: Path = Path("~/.ripbin/ripped_bins/").expanduser(),
+) -> List[BinInfoBundle]:
     """
     Get all binaries of the target
     """
 
     bins = []
-    for parent in Path("~/.ripbin/ripped_bins/").expanduser().resolve().iterdir():
+    #TODO Check for hases
+    hashes = []
+
+    for parent in bin_path.expanduser().resolve().iterdir():
         info_file = parent / "info.json"
-        try:
-            with open(info_file, "r") as f:
-                info = json.load(f)
-        except FileNotFoundError:
-            print(f"File not found: {info_file}")
-            continue
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding error: {e}")
-            continue
-        except Exception as e:
-            print(f"An error occurred: {e}")
+        info = load_info(info_file)
+        if info == {}: 
             continue
 
-        if info["optimization"] in optimization.value:
-            bins.append(parent / info["binary_name"])
+        #try:
+        #    with open(info_file, "r") as f:
+        #        info = json.load(f)
+        #except FileNotFoundError:
+        #    print(f"File not found: {info_file}")
+        #    continue
+        #except json.JSONDecodeError as e:
+        #    print(f"JSON decoding error: {e}")
+        #    continue
+        #except Exception as e:
+        #    print(f"An error occurred: {e}")
+        #    continue
+
+        if info['binary_hash'] in hashes:
+            continue
+
+        if info["optimization"] in optimization.value and info["target"] in target.value:
+            hashes.append(info['binary_hash'])
+            bins.append(BinInfoBundle(parent.joinpath(info["binary_name"]).absolute(), info_file.absolute()))
 
     return bins
 
@@ -414,58 +501,84 @@ def seq_build_all_and_stash(
 
 @app.command()
 def export_dataset(
+    output: Annotated[Path, typer.Argument(help="Directory to save binaries to")],
     target: Annotated[str, typer.Argument(help="Compilation Target")],
-    opt: Annotated[str, typer.Argument(help="Opt Lvl of bin")],
-    output: Annotated[str, typer.Argument(help="Directory to save binaries to")],
+    opt: Annotated[List[str], typer.Argument(help="Opt Lvl of bin")],
     min_text_bytes: Annotated[
         int, typer.Option(help="Minimum number of bytes in a files .text section")
     ] = 0,
+    seperate_bins: Annotated[bool, typer.Option(help="Binaries must be avilable in all optimiztation levels")]=False,
+    
 ):
     """
     Export a dataset from the ripkit db
     """
 
-    if output != "":
-        out_dir = Path(output)
-        if out_dir.exists():
+    if output.exists():
+        if output.is_file():
             print("The output directory already exists, please remove it:!")
             return
+    else:
+        output.mkdir()
+
+
+    for opt_lvl in opt:
+
+        # Get a dictionary of all the binaries that are in the ripbin db
+        target_enum = get_enum_type(RustcTarget, target)
+        opt_enum = opt_lvl_callback(opt_lvl)
+        opt_output = output.joinpath(opt_enum.value)
+        opt_output.mkdir()
+
+
+        #TODO: check that the hash is not 
+        bins = get_bins(target_enum, opt_enum)
+
+        cur_good_bins = []
+        for bundle in track(bins, description=f"Checking  bin sizes..."):
+            bin = bundle.bin
+
+            # Parse the binary with lief
+            parsed_bin = lief.parse(str(bin.resolve()))
+
+            # Get the text section and the bytes themselse
+            text_section = parsed_bin.get_section(".text")
+            num_text_bytes = len(text_section.content)
+
+            # Append a good binary to the list of current good
+            # binaries
+            if num_text_bytes >= min_text_bytes:
+                cur_good_bins.append(bin)
+
+        # Export the bundle, which will be the binary and it's compilation
+        # information. Default will save the bundle together. 
+        # 
+        # If we wish to divide the bins and bundle info then split 
+        if seperate_bins:
+            binary_output = opt_output.joinpath("bins")
+            binary_output.mkdir()
+            info_output = opt_output.joinpath("info")
+            info_output.mkdir()
+
+            for bundle in track(cur_good_bins, description=f"Copying..."):
+
+                #NOTICE: This will renamed the binary itself
+                bin_name_and_hash = bundle.info.parent.name
+                binary_dest_file = binary_output.joinpath(bin_name_and_hash)
+                shutil.copy(bundle.bin.resolve(), binary_dest_file.resolve())
+
+                #NOTICE: This will renamed the information file itself
+                info_dest_file = info_output.joinpath(bin_name_and_hash+".json")
+                shutil.copy(bundle.bin.resolve(), info_dest_file.resolve())
         else:
-            out_dir.mkdir()
 
-    # Get a dictionary of all the binaries that are in the ripbin db
-    target_enum = get_enum_type(RustcTarget, target)
-    opt_enum = get_enum_type(RustcOptimization, opt)
+            for bundle in track(bins, description=f"Copying..."):
+                bin_name_and_hash = bundle.info.parent.name
+                dest_dir = opt_output.joinpath(bin_name_and_hash)
+                dest_dir.mkdir()
 
-    print(opt_enum)
-    print(target_enum)
-
-    bins = get_bins(target_enum, opt_enum)
-
-    # For each optimization levels and its corresponding bin list:
-    # If any binary names appears more than once drop it
-    bins = list(set(bins))
-    print("Finding binaries whose name occurs in opt lvls more than once...")
-
-    # Iterate over the dictionary of opt_lvl : [bins]
-    # where each list of bins has no duplicates
-    cur_good_bins = []
-    for bin in track(bins, description=f"Checking  bin sizes..."):
-
-        # Parse the binary with lief
-        parsed_bin = lief.parse(str(bin.resolve()))
-
-        # Get the text section and the bytes themselse
-        text_section = parsed_bin.get_section(".text")
-        num_text_bytes = len(text_section.content)
-
-        # Append a good binary to the list of current good
-        # binaries
-        if num_text_bytes >= min_text_bytes:
-            cur_good_bins.append(bin)
-    for bin in track(bins, description=f"Copying..."):
-        dest_file = out_dir / bin.name
-        shutil.copy(bin.resolve(), dest_file.resolve())
+                shutil.copy(bundle.bin.resolve(), dest_dir.joinpath(bundle.bin.name).resolve())
+                shutil.copy(bundle.info.resolve(), dest_dir.joinpath("info.json").resolve())
     return
 
 

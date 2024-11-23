@@ -5,9 +5,10 @@ import shutil
 import subprocess
 from collections import Counter
 from dataclasses import asdict, dataclass
-from multiprocessing import Pool
+from multiprocessing import Pool, Queue
 from pathlib import Path
 from typing import Any, List, Tuple
+from yaspin import yaspin
 
 import analyze_cli
 from cargo_picky import db_cli as cargo_db_cli
@@ -206,7 +207,7 @@ def stats(
 
     bins_info = []
 
-    for parent in riplist:
+    for parent in alive_it(riplist, title="Gathering file list"):
         info_file = parent / "info.json"
         info = {}
         try:
@@ -225,8 +226,22 @@ def stats(
         bin_file = parent / info["binary_name"]
         bins_info.append((bin_file, info))
 
-    with Pool(processes=workers) as pool:
-        results = pool.map(stat_worker, bins_info)
+
+    with yaspin(text=f"Using {workers} cores to load {len(bins_info)} binaries") as sp:
+        queue = Queue()
+        with Pool(processes=workers) as pool:
+            results = pool.map(stat_worker, bins_info)
+
+            # Start the worker processes
+            #results = pool.starmap(stat_worker, bins_info)
+
+            ## Track job completion in the main process
+            #completed_jobs = 0
+            #while completed_jobs < len(bins_info):
+            #    queue.get()  # Wait for a job completion signal
+            #    completed_jobs += 1
+            #    if completed_jobs % 10 == 0:
+            #        sp.write(f"Completed {completed_jobs} jobs of {len(bins_info)}.")
 
     stats = {}
     for res in results:
