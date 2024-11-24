@@ -498,62 +498,107 @@ def gen_finetune_data(
     return 
 
 
+#TODO
+def copy_bundle_tree(inp: List[Path], out: Path):
+    """
+    Copy a tree of bundles
+    """
+
+    out.mkdir()
+
+    # Save the bundles
+    for bundle in inp:
+        # Copy the binary and the bundle
+        shutil.copytree(bundle.bin.parent, train_out.joinpath(f"{bundle.bin.parent.name}"))
+    return 
+
+
+
+
 @app.command()
-def gen_pretrain_data(
+def gen_data_splits(
         bin_dir: Annotated[Path, typer.Argument()],
         num_train_bins: Annotated[int, typer.Argument()],
         num_validation_bins: Annotated[int, typer.Argument()],
-        cache_dataset: Annotated[Path, typer.Argument()]=None,
+        num_finetune_bins: Annotated[int, typer.Argument()],
+        train_out: Annotated[Path, typer.Argument()],
+        finetune_out: Annotated[Path, typer.Argument()],
+        test_out: Annotated[Path, typer.Argument()],
     ):
+    """
+    Generate the data splits for: 
+        pretraining
+        finetuning 
+        testing
+    """
 
-    bins_path = Path(bin_dir)
-    if not bins_path.exists():
-        print(f"Bin path {bins_path} does not exist")
+    if not bin_dir.exists():
+        print(f"Bin path {bin_dir} does not exist")
         return
 
-    # Get the bins... 
-    # Need to load the dataset and each bins info for thi
-    #bins_list = list(bins_path.rglob('*'))
 
+    # Load all the binaries
     bins_list = load_bins(bin_dir)
 
-    # Chop down the list 
-    bins_list = random.sample(bins_list, num_train_bins+num_validation_bins)
+    # Sample for training 
+    training_bins = random.sample(bins_list, num_train_bins+num_validation_bins)
+
+    finetune_bundle = []
+
+    # Sample for finetuning
+    while len(finetune_bundle) < num_finetune_bins:
+        bundle = random.sample(bins_list, 1)[0]
+        if bundle not in training_bins and bundle not in finetune_bundle:
+            finetune_bundle.append(bundle)
+        
+
 
     # Get random valudation bins, default to 4 of them 
-    valid_bundle = random.sample(bins_list, num_validation_bins)
-    train_bundle = [x for x in bins_list if x not in valid_bundle]
+    valid_bundle = random.sample(training_bins, num_validation_bins)
+    train_bundle = [x for x in training_bins if x not in valid_bundle]
 
     # Get a list of just the binaries to pass to the generator
     valid_bins = [x.bin for x in valid_bundle]
     train_bins = [x.bin for x in train_bundle]
 
-    print(f"Caching the datasets at {cache_dataset.absolute()}")
-    if cache_dataset is not None:
-        if cache_dataset.is_file():
-            print(f"the cache dataset path exists but it is a file")
-            return 
-        elif not cache_dataset.exists(): 
-            cache_dataset.mkdir()
+    # Make the list for finetuning
+    finetune_bins = [x.bin for x in finetune_bundle]
 
-        train_out = cache_dataset.joinpath("train")
-        train_out.mkdir()
-        valid_out = cache_dataset.joinpath("valid")
-        valid_out.mkdir()
+    # Get the remained of the dataset 
+    test_bins = [x for x in bins_list if x not in training_bins and x not in finetune_bundle]
 
-        # Save the bundles
-        for bundle in train_bundle:
-            # Copy the binary and the bundle
-            shutil.copytree(bundle.bin.parent, train_out.joinpath(f"{bundle.bin.parent.name}"))
-
-        # Save the bundles
-        for bundle in valid_bundle:
-            # Copy the binary and the bundle
-            shutil.copytree(bundle.bin.parent, valid_out.joinpath(f"{bundle.bin.parent.name}"))
+    # Save the training data
+    train_out.mkdir(exist_ok=True)
+    train_out = train_out.joinpath("train")
+    train_out.mkdir()
+    valid_out = train_out.joinpath("valid")
+    valid_out.mkdir()
 
 
+    # Save the bundles
+    for bundle in train_bundle:
+        # Copy the binary and the bundle
+        shutil.copytree(bundle.bin.parent, train_out.joinpath(f"{bundle.bin.parent.name}"))
+
+    # Save the bundles
+    for bundle in valid_bundle:
+        # Copy the binary and the bundle
+        shutil.copytree(bundle.bin.parent, valid_out.joinpath(f"{bundle.bin.parent.name}"))
+
+    # Save the finetuning data
+    finetune_out.mkdir(exist_ok=True)
+    for bundle in finetune_bundle:
+        # Copy the binary and the bundle
+        shutil.copytree(bundle.bin.parent, finetune_out.joinpath(f"{bundle.bin.parent.name}"))
+
+    # Save the test out 
+    test_out.mkdir(exist_ok=True)
+    for bundle in test_bins:
+        # Copy the binary and the bundle
+        shutil.copytree(bundle.bin.parent, test_out.joinpath(f"{bundle.bin.parent.name}"))
 
     generate_data_src_pretrain_all(train_bins, valid_bins)
+    generate_data_src_finetune_for_funcbound(finetune_bins)
 
     return
 
@@ -576,6 +621,17 @@ def generate_data_src_pretrain_all(train_bins, validation_bins):
 
     train_path = Path("data-src/pretrain_all/train.in")
     valid_path = Path("data-src/pretrain_all/valid.in")
+
+    if train_path.exists():
+        train_path.unlink()
+    if not train_path.parent.exists():
+        train_path.parent.mkdir()
+
+    if valid_path.exists():
+        valid_path.unlink()
+    if not valid_path.parent.exists():
+        valid_path.parent.mkdir()
+
     train_files = train_bins
     valid_files = validation_bins
 
