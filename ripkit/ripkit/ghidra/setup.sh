@@ -1,8 +1,8 @@
 
-sudo apt install -y openjdk-17-jre
-sudo apt install -y openjdk-17-jdk
-sudo apt install -y wget 
-sudo apt install -y unzip
+# sudo apt install -y openjdk-17-jre
+# sudo apt install -y openjdk-17-jdk
+# sudo apt install -y wget 
+# sudo apt install -y unzip
 
 echo "Done installing deps"
 
