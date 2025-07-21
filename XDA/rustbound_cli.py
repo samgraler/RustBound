@@ -222,7 +222,7 @@ def xda_predict_raw(bin: Path, model): #-> Generator[tuple[np.ndarray,float], No
     for i in range(0, len(text_bytes)-STEP-1, STEP):
         loop_counter+=1
 
-        # Get the total chunnk, and the labeled chunk 
+        # Get the total chunk, and the labeled chunk 
         token_chunk = text_bytes[i:i+STEP]
 
         # Make a sting of 512 tokens
@@ -315,8 +315,8 @@ def unified_gen_training(
     base_path: Annotated[str, typer.Argument()],
     ):
     '''
-    For each pretraining dataset used in other experiemnts, pick x binaries.
-    For each finetuning dataset used in other expriments, pick y binaries 
+    For each pretraining dataset used in other experiments, pick x binaries.
+    For each finetuning dataset used in other experiments, pick y binaries 
 
     Pretraining requires a minimum of 4 bins for pre training 
     '''
@@ -422,8 +422,8 @@ def cherry_pick_test(
 
 
 
-    # Accumulate the whole datset 
-    # TODO: Expecting the dataset to be in strucute of:
+    # Accumulate the whole dataset 
+    # TODO: Expecting the dataset to be in structure of:
     #  <hash>_<bin_name>_|opt|
     #   | info.json
     #   | <bin_name>

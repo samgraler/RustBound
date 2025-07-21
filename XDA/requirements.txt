@@ -1,0 +1,61 @@
+about-time==4.2.1
+alive-progress==3.3.0
+brotlicffi @ file:///croot/brotlicffi_1736182461069/work
+capstone==5.0.6
+certifi @ file:///croot/certifi_1752653701669/work/certifi
+cffi @ file:///croot/cffi_1736182485317/work
+charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+click==8.2.1
+colorama @ file:///croot/colorama_1672386526460/work
+Cython==3.1.2
+-e git+ssh://git@github.com/UCdasec/RustBound.git@77806622758ab9589db1ad21c3809d9cedc074be#egg=fairseq&subdirectory=XDA
+filelock @ file:///croot/filelock_1744281381737/work
+fsspec==2025.7.0
+gmpy2 @ file:///croot/gmpy2_1738085463648/work
+graphemeu==0.7.2
+idna @ file:///croot/idna_1714398848350/work
+Jinja2 @ file:///croot/jinja2_1741710844255/work
+joblib @ file:///croot/joblib_1718217211762/work
+lief==0.16.6
+lxml==6.0.0
+markdown-it-py==3.0.0
+MarkupSafe @ file:///croot/markupsafe_1738584038848/work
+mdurl==0.1.2
+mkl-service==2.4.0
+mkl_fft @ file:///io/mkl313/mkl_fft_1730824109137/work
+mkl_random @ file:///io/mkl313/mkl_random_1730823916628/work
+mpmath @ file:///croot/mpmath_1690848262763/work
+networkx @ file:///croot/networkx_1737039604450/work
+numpy @ file:///croot/numpy_and_numpy_base_1747238018250/work/dist/numpy-2.2.5-cp310-cp310-linux_x86_64.whl#sha256=5a6df30fd2c407292da04652f137bbbe50d4765b8e20b11b2e225dadf36c269e
+pandas==2.3.1
+pefile==2024.8.26
+pillow @ file:///croot/pillow_1752524526621/work
+polars==1.31.0
+portalocker==3.2.0
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pyelftools==0.32
+Pygments==2.19.2
+PySocks @ file:///home/builder/ci_310/pysocks_1640793678128/work
+python-dateutil==2.9.0.post0
+python-magic==0.4.27
+pytz==2025.2
+PyYAML @ file:///croot/pyyaml_1728657952215/work
+regex==2024.11.6
+requests @ file:///croot/requests_1750426329888/work
+rich==14.0.0
+sacrebleu==2.5.1
+scikit-learn @ file:///croot/scikit-learn_1737988764076/work
+scipy @ file:///croot/scipy_1747238027288/work/dist/scipy-1.15.3-cp310-cp310-linux_x86_64.whl#sha256=4055d6b52bbbfc19594ac7c25008889945de175e153afc0935b6415716fa348e
+shellingham==1.5.4
+six==1.17.0
+sympy==1.13.1
+tabulate==0.9.0
+threadpoolctl @ file:///croot/threadpoolctl_1719407800858/work
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+tqdm==4.67.1
+typer==0.16.0
+typing_extensions @ file:///croot/typing_extensions_1734714854207/work
+tzdata==2025.2
+urllib3 @ file:///croot/urllib3_1750775463400/work
