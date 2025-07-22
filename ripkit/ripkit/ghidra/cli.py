@@ -794,7 +794,7 @@ def install_ghidra():
     """
 
     # get the path of this file
-    install_script = Path(os.path.abspath(__file__))
+    install_script = Path(os.path.abspath(__file__)).parent
 
     # Install ghidra
     cmd = f"{install_script.resolve()}/setup.sh"
@@ -813,7 +813,7 @@ def install_ghidra():
         scripts.mkdir()
 
     # Copy the file to the location
-    script_file = f"{install_script.parent}/List_Function_and_Entry.py"
+    script_file = f"{install_script}/List_Function_and_Entry.py"
     shutil.copy2(script_file, scripts)
     return
 

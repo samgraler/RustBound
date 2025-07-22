@@ -14,7 +14,6 @@ import lief
 import typer
 from alive_progress import alive_bar, alive_it
 #from .cli_utils import get_enum_type, opt_lvl_callback
-from .cli_utils import get_enum_type, opt_lvl_callback
 from rich import print
 from rich.console import Console
 from rich.progress import track
